@@ -13,6 +13,14 @@ const server = serve({
         const points = await getPoints();
         return Response.json(points);
       }
+    },
+
+    "/test-data": {
+      async GET(req) {
+        const { generateTestData } = await import("./testData");
+        await generateTestData();
+        return new Response("Test data generated");
+      }
     }
   }
 });
