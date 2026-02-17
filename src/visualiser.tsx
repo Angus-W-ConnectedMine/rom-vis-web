@@ -7,8 +7,18 @@ import {
   fitCameraToPointCloud,
   getPointsInScreenSelection,
 } from "./geometry";
-import { Overlay, type RegionMeta, type SelectionRect } from "./overlay";
+import {
+  Overlay,
+  type PendingRegionSelection,
+  type RegionMeta,
+  type SelectionRect,
+} from "./overlay";
 import type { Point } from "./points";
+
+interface PendingRegionDraft extends PendingRegionSelection {
+  min: Point;
+  max: Point;
+}
 
 function createScene(): THREE.Scene {
   const scene = new THREE.Scene();
@@ -46,7 +56,7 @@ async function getPoints(): Promise<Point[]> {
   return (await response.json()) as Point[];
 }
 
-function getRegionMinMax(points: Point[]): { min: Point; max: Point } {
+function getRegionStats(points: Point[]): { min: Point; max: Point; avgW: number } {
   let minX = Infinity;
   let minY = Infinity;
   let minZ = Infinity;
@@ -55,6 +65,7 @@ function getRegionMinMax(points: Point[]): { min: Point; max: Point } {
   let maxY = -Infinity;
   let maxZ = -Infinity;
   let maxW = -Infinity;
+  let sumW = 0;
 
   for (const point of points) {
     if (point.x < minX) minX = point.x;
@@ -65,11 +76,13 @@ function getRegionMinMax(points: Point[]): { min: Point; max: Point } {
     if (point.y > maxY) maxY = point.y;
     if (point.z > maxZ) maxZ = point.z;
     if (point.w > maxW) maxW = point.w;
+    sumW += point.w;
   }
 
   return {
     min: { x: minX, y: minY, z: minZ, w: minW },
     max: { x: maxX, y: maxY, z: maxZ, w: maxW },
+    avgW: points.length > 0 ? sumW / points.length : 0,
   };
 }
 
@@ -105,9 +118,11 @@ export function Visualiser() {
   const pointsRef = useRef<Point[]>([]);
   const pointOffsetRef = useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   const regionPrismsRef = useRef<THREE.Group[]>([]);
-  const regionIdRef = useRef(1);
+  const pendingPrismRef = useRef<THREE.Group | null>(null);
+  const regionKeyRef = useRef(1);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
+  const [pendingSelection, setPendingSelection] = useState<PendingRegionDraft | null>(null);
   const [status, setStatus] = useState("Loading points...");
   const [interactionElement, setInteractionElement] = useState<HTMLCanvasElement | null>(null);
 
@@ -217,6 +232,8 @@ export function Visualiser() {
       controlsRef.current = null;
       pointsRef.current = [];
       pointOffsetRef.current = { x: 0, y: 0, z: 0 };
+      pendingPrismRef.current = null;
+      setPendingSelection(null);
       setInteractionElement(null);
     };
   }, []);
@@ -230,6 +247,10 @@ export function Visualiser() {
   }, []);
 
   const handleSelectionComplete = useCallback((rect: SelectionRect): void => {
+    if (pendingSelection) {
+      return;
+    }
+
     const scene = sceneRef.current;
     const camera = cameraRef.current;
     const renderer = rendererRef.current;
@@ -261,31 +282,75 @@ export function Visualiser() {
       return;
     }
 
-    regionPrismsRef.current.push(prism);
-    const region = getRegionMinMax(selectedPoints);
+    pendingPrismRef.current = prism;
+    const region = getRegionStats(selectedPoints);
     const pointOffset = pointOffsetRef.current;
-    const id = regionIdRef.current;
-    regionIdRef.current += 1;
+    const suggestedId = `region-${regionKeyRef.current}`;
+
+    setPendingSelection({
+      suggestedId,
+      pointCount: selectedPoints.length,
+      minW: region.min.w,
+      maxW: region.max.w,
+      avgW: region.avgW,
+      min: {
+        x: region.min.x + pointOffset.x,
+        y: region.min.y + pointOffset.y,
+        z: region.min.z + pointOffset.z,
+        w: region.min.w,
+      },
+      max: {
+        x: region.max.x + pointOffset.x,
+        y: region.max.y + pointOffset.y,
+        z: region.max.z + pointOffset.z,
+        w: region.max.w,
+      },
+    });
+
+    setStatus("Review region stats and set an ID, or cancel.");
+  }, [pendingSelection]);
+
+  const handleConfirmSelection = useCallback((regionId: string): void => {
+    const pendingPrism = pendingPrismRef.current;
+    const pending = pendingSelection;
+
+    if (!pendingPrism || !pending) {
+      return;
+    }
+
+    regionPrismsRef.current.push(pendingPrism);
+    pendingPrismRef.current = null;
+
+    const key = regionKeyRef.current;
+    regionKeyRef.current += 1;
 
     setRegions((prev) => [
       ...prev,
       {
-        id,
-        pointCount: selectedPoints.length,
-        min: {
-          x: region.min.x + pointOffset.x,
-          y: region.min.y + pointOffset.y,
-          z: region.min.z + pointOffset.z,
-          w: region.min.w,
-        },
-        max: {
-          x: region.max.x + pointOffset.x,
-          y: region.max.y + pointOffset.y,
-          z: region.max.z + pointOffset.z,
-          w: region.max.w,
-        },
+        key,
+        regionId,
+        pointCount: pending.pointCount,
+        minW: pending.minW,
+        maxW: pending.maxW,
+        avgW: pending.avgW,
+        min: pending.min,
+        max: pending.max,
       },
     ]);
+    setPendingSelection(null);
+    setStatus("Region saved.");
+  }, [pendingSelection]);
+
+  const handleCancelSelection = useCallback((): void => {
+    const scene = sceneRef.current;
+    const pendingPrism = pendingPrismRef.current;
+
+    if (scene && pendingPrism) {
+      scene.remove(pendingPrism);
+    }
+    pendingPrismRef.current = null;
+    setPendingSelection(null);
+    setStatus("Region selection cancelled.");
   }, []);
 
   return (
@@ -301,9 +366,13 @@ export function Visualiser() {
       <Overlay
         interactionElement={interactionElement}
         selectionRect={selectionRect}
+        selectionEnabled={!pendingSelection}
         onSelectionRectChange={setSelectionRect}
         onSelectionActiveChange={handleSelectionActiveChange}
         onSelectionComplete={handleSelectionComplete}
+        pendingSelection={pendingSelection}
+        onConfirmSelection={handleConfirmSelection}
+        onCancelSelection={handleCancelSelection}
         status={status}
         regions={regions}
         latestRegion={latestRegion}

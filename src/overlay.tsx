@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Point } from "./points";
+import { RegionFormModal } from "./regionFormModal";
 
 export interface SelectionRect {
   left: number;
@@ -9,18 +10,34 @@ export interface SelectionRect {
 }
 
 export interface RegionMeta {
-  id: number;
+  key: number;
+  regionId: string;
   pointCount: number;
+  minW: number;
+  maxW: number;
+  avgW: number;
   min: Point;
   max: Point;
+}
+
+export interface PendingRegionSelection {
+  suggestedId: string;
+  pointCount: number;
+  minW: number;
+  maxW: number;
+  avgW: number;
 }
 
 interface OverlayProps {
   interactionElement: HTMLCanvasElement | null;
   selectionRect: SelectionRect | null;
+  selectionEnabled: boolean;
   onSelectionRectChange: (value: SelectionRect | null) => void;
   onSelectionActiveChange: (value: boolean) => void;
   onSelectionComplete: (value: SelectionRect) => void;
+  pendingSelection: PendingRegionSelection | null;
+  onConfirmSelection: (regionId: string) => void;
+  onCancelSelection: () => void;
   status: string;
   regions: RegionMeta[];
   latestRegion: RegionMeta | null;
@@ -30,9 +47,13 @@ export function Overlay(props: OverlayProps) {
   const {
     interactionElement,
     selectionRect,
+    selectionEnabled,
     onSelectionRectChange,
     onSelectionActiveChange,
     onSelectionComplete,
+    pendingSelection,
+    onConfirmSelection,
+    onCancelSelection,
     status,
     regions,
     latestRegion,
@@ -100,6 +121,10 @@ export function Overlay(props: OverlayProps) {
     };
 
     const onPointerDown = (event: PointerEvent): void => {
+      if (!selectionEnabled) {
+        return;
+      }
+
       if (!event.shiftKey || event.button !== 0) {
         return;
       }
@@ -145,6 +170,7 @@ export function Overlay(props: OverlayProps) {
     onSelectionActiveChange,
     onSelectionComplete,
     onSelectionRectChange,
+    selectionEnabled,
   ]);
 
   return (
@@ -197,8 +223,12 @@ export function Overlay(props: OverlayProps) {
           {latestRegion
             ? JSON.stringify(
               {
-                id: latestRegion.id,
+                key: latestRegion.key,
+                regionId: latestRegion.regionId,
                 pointCount: latestRegion.pointCount,
+                minW: latestRegion.minW,
+                maxW: latestRegion.maxW,
+                avgW: latestRegion.avgW,
                 min: latestRegion.min,
                 max: latestRegion.max,
               },
@@ -208,6 +238,13 @@ export function Overlay(props: OverlayProps) {
             : "No selections yet"}
         </pre>
       </aside>
+      {pendingSelection ? (
+        <RegionFormModal
+          pendingSelection={pendingSelection}
+          onConfirmSelection={onConfirmSelection}
+          onCancelSelection={onCancelSelection}
+        />
+      ) : null}
     </>
   );
 }
