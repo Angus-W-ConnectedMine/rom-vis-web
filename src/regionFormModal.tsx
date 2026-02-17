@@ -28,51 +28,17 @@ export function RegionFormModal(props: RegionFormModalProps) {
 
   return (
     <dialog
+      className="region-dialog"
       open
       onCancel={(event) => {
         event.preventDefault();
         onCancelSelection();
       }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        margin: 0,
-        padding: 0,
-        border: "none",
-        background: "transparent",
-        width: "100vw",
-        maxWidth: "100vw",
-        height: "100vh",
-        maxHeight: "100vh",
-        overflow: "hidden",
-        zIndex: 20,
-      }}
     >
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          background: "rgba(2, 6, 23, 0.55)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 16,
-          boxSizing: "border-box",
-        }}
-      >
-        <div
-        style={{
-          width: "min(480px, 100%)",
-          borderRadius: 10,
-          border: "1px solid rgba(148, 163, 184, 0.4)",
-          background: "rgba(15, 23, 42, 0.96)",
-          color: "#e2e8f0",
-          padding: 14,
-          fontFamily: "ui-sans-serif, system-ui, sans-serif",
-        }}
-      >
-        <div style={{ fontWeight: 700, marginBottom: 10 }}>Save Region</div>
-        <div style={{ fontSize: 13, lineHeight: 1.4, marginBottom: 10 }}>
+      <div className="region-dialog-scrim">
+        <div className="region-dialog-card">
+        <div className="region-dialog-title">Save Region</div>
+        <div className="region-dialog-stats">
           <div>Points: <strong>{pendingSelection.pointCount}</strong></div>
           <div>
             W min/max: <strong>{pendingSelection.minW.toFixed(3)}</strong> /{" "}
@@ -80,10 +46,11 @@ export function RegionFormModal(props: RegionFormModalProps) {
           </div>
           <div>W avg: <strong>{pendingSelection.avgW.toFixed(3)}</strong></div>
         </div>
-        <label style={{ display: "block", fontSize: 13, marginBottom: 6 }}>
+        <label className="region-dialog-label">
           Region ID
         </label>
         <input
+          className="region-dialog-input"
           ref={inputRef}
           type="text"
           defaultValue={pendingSelection.suggestedId}
@@ -93,43 +60,19 @@ export function RegionFormModal(props: RegionFormModalProps) {
               submitPendingSelection();
             }
           }}
-          style={{
-            width: "100%",
-            boxSizing: "border-box",
-            borderRadius: 6,
-            border: "1px solid rgba(148, 163, 184, 0.45)",
-            background: "rgba(2, 6, 23, 0.9)",
-            color: "#e2e8f0",
-            padding: "8px 10px",
-            marginBottom: 12,
-          }}
         />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <div className="region-dialog-actions">
           <button
+            className="region-dialog-btn"
             type="button"
             onClick={onCancelSelection}
-            style={{
-              border: "1px solid rgba(148, 163, 184, 0.45)",
-              borderRadius: 6,
-              background: "transparent",
-              color: "#cbd5e1",
-              padding: "6px 10px",
-              cursor: "pointer",
-            }}
           >
             Cancel
           </button>
           <button
+            className="region-dialog-btn-primary"
             type="button"
             onClick={submitPendingSelection}
-            style={{
-              border: "1px solid rgba(34, 197, 94, 0.5)",
-              borderRadius: 6,
-              background: "rgba(22, 163, 74, 0.25)",
-              color: "#dcfce7",
-              padding: "6px 10px",
-              cursor: "pointer",
-            }}
           >
             Save Region
           </button>

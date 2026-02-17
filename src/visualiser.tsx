@@ -354,15 +354,8 @@ export function Visualiser() {
   }, []);
 
   return (
-    <div
-      style={{
-        position: "relative",
-        width: "100%",
-        height: "100%",
-        overflow: "hidden",
-      }}
-    >
-      <div ref={viewportRef} style={{ width: "100%", height: "100%" }} />
+    <div className="visualiser-root">
+      <div ref={viewportRef} className="visualiser-viewport" />
       <Overlay
         interactionElement={interactionElement}
         selectionRect={selectionRect}
