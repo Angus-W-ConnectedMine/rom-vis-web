@@ -1,29 +1,27 @@
 import { useEffect, useRef } from "react";
-import type { PendingRegionSelection } from "./overlay";
+import type { RegionMeta } from "./overlay";
 
 interface RegionFormModalProps {
-  pendingSelection: PendingRegionSelection;
-  onConfirmSelection: (regionId: string) => void;
-  onCancelSelection: () => void;
+  region: RegionMeta;
+  onSaveEdit: (regionId: string) => void;
+  onCancelEdit: () => void;
 }
 
 export function RegionFormModal(props: RegionFormModalProps) {
-  const { pendingSelection, onConfirmSelection, onCancelSelection } = props;
+  const { region, onSaveEdit, onCancelEdit } = props;
   const selectionIDInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (selectionIDInputRef.current) {
-      selectionIDInputRef.current.value = pendingSelection.suggestedId;
+      selectionIDInputRef.current.value = region.regionId;
       selectionIDInputRef.current.focus();
       selectionIDInputRef.current.select();
     }
-  }, [pendingSelection]);
+  }, [region]);
 
   const onFormConfirmed = (): void => {
     const selectionID = selectionIDInputRef.current?.value?.trim() ?? "";
-    onConfirmSelection(
-      selectionID.length > 0 ? selectionID : pendingSelection.suggestedId,
-    );
+    onSaveEdit(selectionID.length > 0 ? selectionID : region.regionId);
   };
 
   return (
@@ -32,19 +30,19 @@ export function RegionFormModal(props: RegionFormModalProps) {
       open
       onCancel={(event) => {
         event.preventDefault();
-        onCancelSelection();
+        onCancelEdit();
       }}
     >
       <div className="modal-scrim">
         <div className="modal-card">
-          <div className="modal-title">Save Region</div>
+          <div className="modal-title">Edit Region</div>
           <div className="modal-stats">
-            <div>Points: <strong>{pendingSelection.pointCount}</strong></div>
+            <div>Points: <strong>{region.pointCount}</strong></div>
             <div>
-              W min/max: <strong>{pendingSelection.minW.toFixed(3)}</strong> /{" "}
-              <strong>{pendingSelection.maxW.toFixed(3)}</strong>
+              W min/max: <strong>{region.minW.toFixed(3)}</strong> /{" "}
+              <strong>{region.maxW.toFixed(3)}</strong>
             </div>
-            <div>W avg: <strong>{pendingSelection.avgW.toFixed(3)}</strong></div>
+            <div>W avg: <strong>{region.avgW.toFixed(3)}</strong></div>
           </div>
           <label className="label">
             Region ID
@@ -53,7 +51,7 @@ export function RegionFormModal(props: RegionFormModalProps) {
             className="input"
             ref={selectionIDInputRef}
             type="text"
-            defaultValue={pendingSelection.suggestedId}
+            defaultValue={region.regionId}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -67,12 +65,12 @@ export function RegionFormModal(props: RegionFormModalProps) {
               type="button"
               onClick={onFormConfirmed}
             >
-              Ok
+              Save
             </button>
             <button
               className="btn"
               type="button"
-              onClick={onCancelSelection}
+              onClick={onCancelEdit}
             >
               Cancel
             </button>

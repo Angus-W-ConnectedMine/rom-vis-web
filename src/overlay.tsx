@@ -19,19 +19,12 @@ export interface RegionMeta {
   max: Point;
 }
 
-export interface PendingRegionSelection {
-  suggestedId: string;
-  pointCount: number;
-  minW: number;
-  maxW: number;
-  avgW: number;
-}
-
 interface OverlayProps {
   selectionRect: SelectionRect | null;
-  pendingSelection: PendingRegionSelection | null;
-  onConfirmSelection: (regionId: string) => void;
-  onCancelSelection: () => void;
+  editingRegion: RegionMeta | null;
+  onSaveRegionEdit: (key: number, regionId: string) => void;
+  onCancelRegionEdit: () => void;
+  onRequestRegionEdit: (key: number) => void;
   status: string;
   regions: RegionMeta[];
   selectedRegionKeys: number[];
@@ -43,9 +36,10 @@ interface OverlayProps {
 export function Overlay(props: OverlayProps) {
   const {
     selectionRect,
-    pendingSelection,
-    onConfirmSelection,
-    onCancelSelection,
+    editingRegion,
+    onSaveRegionEdit,
+    onCancelRegionEdit,
+    onRequestRegionEdit,
     status,
     regions,
     selectedRegionKeys,
@@ -91,16 +85,28 @@ export function Overlay(props: OverlayProps) {
               >
                 <div className="overlay-region-row">
                   <strong>{region.regionId}</strong>
-                  <button
-                    className="btn overlay-btn-delete"
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDeleteRegion(region.key);
-                    }}
-                  >
-                    x
-                  </button>
+                  <div>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRequestRegionEdit(region.key);
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="btn overlay-btn-delete"
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDeleteRegion(region.key);
+                      }}
+                    >
+                      x
+                    </button>
+                  </div>
                 </div>
                 <div className="overlay-region-meta">
                   points: {region.pointCount} | W min/max/avg: {region.minW.toFixed(3)} / {region.maxW.toFixed(3)} / {region.avgW.toFixed(3)}
@@ -122,11 +128,11 @@ export function Overlay(props: OverlayProps) {
         </div>
       </aside>
 
-      {pendingSelection ? (
+      {editingRegion ? (
         <RegionFormModal
-          pendingSelection={pendingSelection}
-          onConfirmSelection={onConfirmSelection}
-          onCancelSelection={onCancelSelection}
+          region={editingRegion}
+          onSaveEdit={(regionId) => onSaveRegionEdit(editingRegion.key, regionId)}
+          onCancelEdit={onCancelRegionEdit}
         />
       ) : null}
     </>

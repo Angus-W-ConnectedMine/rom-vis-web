@@ -9,17 +9,11 @@ import {
 } from "./geometry";
 import {
   Overlay,
-  type PendingRegionSelection,
   type RegionMeta,
   type SelectionRect,
 } from "./overlay";
 import type { Point } from "./points";
 import { useSelectionController } from "./useSelectionController";
-
-interface PendingRegionDraft extends PendingRegionSelection {
-  min: Point;
-  max: Point;
-}
 
 interface RegionPrism {
   key: number;
@@ -127,20 +121,19 @@ export function Visualiser() {
   const pointsRef = useRef<Point[]>([]);
   const pointOffsetRef = useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   const regionPrismsRef = useRef<RegionPrism[]>([]);
-  const pendingPrismRef = useRef<THREE.Group | null>(null);
   const regionKeyRef = useRef(1);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
   const [selectedRegionKeys, setSelectedRegionKeys] = useState<number[]>([]);
-  const [pendingSelection, setPendingSelection] = useState<PendingRegionDraft | null>(null);
+  const [editingRegionKey, setEditingRegionKey] = useState<number | null>(null);
   const [status, setStatus] = useState("Loading points...");
   const [interactionElement, setInteractionElement] = useState<HTMLCanvasElement | null>(null);
 
   const selectionRectRef = useRef<SelectionRect | null>(null);
-  const pendingSelectionRef = useRef<PendingRegionDraft | null>(null);
+  const editingRegionKeyRef = useRef<number | null>(null);
 
   useEffect(() => {
-    pendingSelectionRef.current = pendingSelection;
-  }, [pendingSelection]);
+    editingRegionKeyRef.current = editingRegionKey;
+  }, [editingRegionKey]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -203,7 +196,7 @@ export function Visualiser() {
     };
 
     const onSceneClick = (event: MouseEvent): void => {
-      if (pendingSelectionRef.current || selectionRectRef.current) {
+      if (editingRegionKeyRef.current !== null || selectionRectRef.current) {
         return;
       }
 
@@ -288,9 +281,8 @@ export function Visualiser() {
       controlsRef.current = null;
       pointsRef.current = [];
       pointOffsetRef.current = { x: 0, y: 0, z: 0 };
-      pendingPrismRef.current = null;
-      setPendingSelection(null);
       setSelectedRegionKeys([]);
+      setEditingRegionKey(null);
       setInteractionElement(null);
     };
   }, []);
@@ -304,7 +296,7 @@ export function Visualiser() {
   }, []);
 
   const handleSelectionComplete = useCallback((rect: SelectionRect): void => {
-    if (pendingSelection) {
+    if (editingRegionKey !== null) {
       return;
     }
 
@@ -339,37 +331,47 @@ export function Visualiser() {
       return;
     }
 
-    pendingPrismRef.current = prism;
     const region = getRegionStats(selectedPoints);
     const pointOffset = pointOffsetRef.current;
     const suggestedId = `region-${regionKeyRef.current}`;
+    const key = regionKeyRef.current;
+    regionKeyRef.current += 1;
 
-    setPendingSelection({
-      suggestedId,
-      pointCount: selectedPoints.length,
-      minW: region.min.w,
-      maxW: region.max.w,
-      avgW: region.avgW,
-      min: {
-        x: region.min.x + pointOffset.x,
-        y: region.min.y + pointOffset.y,
-        z: region.min.z + pointOffset.z,
-        w: region.min.w,
-      },
-      max: {
-        x: region.max.x + pointOffset.x,
-        y: region.max.y + pointOffset.y,
-        z: region.max.z + pointOffset.z,
-        w: region.max.w,
-      },
+    prism.userData.regionKey = key;
+    prism.traverse((node) => {
+      node.userData.regionKey = key;
     });
+    regionPrismsRef.current.push({ key, prism });
 
-    setStatus("Review region stats and set an ID, or cancel.");
-  }, [pendingSelection]);
+    setRegions((prev) => [
+      ...prev,
+      {
+        key,
+        regionId: suggestedId,
+        pointCount: selectedPoints.length,
+        minW: region.min.w,
+        maxW: region.max.w,
+        avgW: region.avgW,
+        min: {
+          x: region.min.x + pointOffset.x,
+          y: region.min.y + pointOffset.y,
+          z: region.min.z + pointOffset.z,
+          w: region.min.w,
+        },
+        max: {
+          x: region.max.x + pointOffset.x,
+          y: region.max.y + pointOffset.y,
+          z: region.max.z + pointOffset.z,
+          w: region.max.w,
+        },
+      },
+    ]);
+    setStatus("Region added. Use Edit to rename.");
+  }, [editingRegionKey]);
 
   const { selectionRect } = useSelectionController({
     interactionElement,
-    selectionEnabled: !pendingSelection,
+    selectionEnabled: editingRegionKey === null,
     onSelectionActiveChange: handleSelectionActiveChange,
     onSelectionComplete: handleSelectionComplete,
   });
@@ -378,50 +380,28 @@ export function Visualiser() {
     selectionRectRef.current = selectionRect;
   }, [selectionRect]);
 
-  const handleConfirmSelection = useCallback((regionId: string): void => {
-    const pendingPrism = pendingPrismRef.current;
-    const pending = pendingSelection;
+  const handleRequestRegionEdit = useCallback((key: number): void => {
+    setEditingRegionKey(key);
+  }, []);
 
-    if (!pendingPrism || !pending) {
-      return;
-    }
+  const handleSaveRegionEdit = useCallback((key: number, regionId: string): void => {
+    setRegions((prev) =>
+      prev.map((region) =>
+        region.key === key
+          ? {
+              ...region,
+              regionId,
+            }
+          : region,
+      ),
+    );
+    setEditingRegionKey(null);
+    setStatus("Region updated.");
+  }, []);
 
-    const key = regionKeyRef.current;
-    regionKeyRef.current += 1;
-    pendingPrism.userData.regionKey = key;
-    pendingPrism.traverse((node) => {
-      node.userData.regionKey = key;
-    });
-    regionPrismsRef.current.push({ key, prism: pendingPrism });
-    pendingPrismRef.current = null;
-
-    setRegions((prev) => [
-      ...prev,
-      {
-        key,
-        regionId,
-        pointCount: pending.pointCount,
-        minW: pending.minW,
-        maxW: pending.maxW,
-        avgW: pending.avgW,
-        min: pending.min,
-        max: pending.max,
-      },
-    ]);
-    setPendingSelection(null);
-    setStatus("Region saved.");
-  }, [pendingSelection]);
-
-  const handleCancelSelection = useCallback((): void => {
-    const scene = sceneRef.current;
-    const pendingPrism = pendingPrismRef.current;
-
-    if (scene && pendingPrism) {
-      scene.remove(pendingPrism);
-    }
-    pendingPrismRef.current = null;
-    setPendingSelection(null);
-    setStatus("Region selection cancelled.");
+  const handleCancelRegionEdit = useCallback((): void => {
+    setEditingRegionKey(null);
+    setStatus("Edit cancelled.");
   }, []);
 
   const applyRegionSelectionVisuals = useCallback((selectedKeys: number[]): void => {
@@ -470,20 +450,26 @@ export function Visualiser() {
     regionPrismsRef.current = nextRegionPrisms;
     setRegions((prev) => prev.filter((region) => region.key !== key));
     setSelectedRegionKeys((prev) => prev.filter((value) => value !== key));
+    setEditingRegionKey((prev) => (prev === key ? null : prev));
   }, []);
 
   const handleClearSelections = useCallback((): void => {
     setSelectedRegionKeys([]);
   }, []);
 
+  const editingRegion = editingRegionKey === null
+    ? null
+    : regions.find((region) => region.key === editingRegionKey) ?? null;
+
   return (
     <div className="visualiser-root">
       <div ref={viewportRef} className="visualiser-viewport" />
       <Overlay
         selectionRect={selectionRect}
-        pendingSelection={pendingSelection}
-        onConfirmSelection={handleConfirmSelection}
-        onCancelSelection={handleCancelSelection}
+        editingRegion={editingRegion}
+        onSaveRegionEdit={handleSaveRegionEdit}
+        onCancelRegionEdit={handleCancelRegionEdit}
+        onRequestRegionEdit={handleRequestRegionEdit}
         status={status}
         regions={regions}
         selectedRegionKeys={selectedRegionKeys}
