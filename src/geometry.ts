@@ -2,6 +2,13 @@ import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Point } from "./points";
 
+export interface ScreenSelectionRect {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
 export function addPointCloud(scene: THREE.Scene, points: Point[]): THREE.Points {
   const positions = new Float32Array(points.length * 3);
 
@@ -140,4 +147,84 @@ export function fitCameraToPointCloud(
   controls.minDistance = radius * 0.05;
   controls.maxDistance = radius * 20;
   controls.update();
+}
+
+export function getPointBoundsInScreenSelection(
+  points: Point[],
+  camera: THREE.PerspectiveCamera,
+  viewportWidth: number,
+  viewportHeight: number,
+  selectionRect: ScreenSelectionRect,
+): THREE.Box3 | null {
+  const projected = new THREE.Vector3();
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+
+  for (const point of points) {
+    projected.set(point.x, point.y, point.z).project(camera);
+
+    if (projected.z < -1 || projected.z > 1) {
+      continue;
+    }
+
+    const screenX = (projected.x * 0.5 + 0.5) * viewportWidth;
+    const screenY = (-projected.y * 0.5 + 0.5) * viewportHeight;
+
+    if (
+      screenX < selectionRect.minX ||
+      screenX > selectionRect.maxX ||
+      screenY < selectionRect.minY ||
+      screenY > selectionRect.maxY
+    ) {
+      continue;
+    }
+
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.z < minZ) minZ = point.z;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+    if (point.z > maxZ) maxZ = point.z;
+  }
+
+  if (!Number.isFinite(minX)) {
+    return null;
+  }
+
+  return new THREE.Box3(
+    new THREE.Vector3(minX, minY, minZ),
+    new THREE.Vector3(maxX, maxY, maxZ),
+  );
+}
+
+export function addSelectionCube(
+  scene: THREE.Scene,
+  bounds: THREE.Box3,
+): THREE.Mesh {
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const epsilon = 0.0001;
+
+  const geometry = new THREE.BoxGeometry(
+    Math.max(size.x, epsilon),
+    Math.max(size.y, epsilon),
+    Math.max(size.z, epsilon),
+  );
+
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x22d3ee,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.9,
+  });
+
+  const cube = new THREE.Mesh(geometry, material);
+  cube.position.copy(center);
+  scene.add(cube);
+  return cube;
 }

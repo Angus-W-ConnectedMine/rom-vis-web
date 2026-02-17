@@ -1,7 +1,18 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { addPointCloud, fitCameraToPointCloud } from "./geometry";
+import {
+  addPointCloud,
+  addSelectionCube,
+  fitCameraToPointCloud,
+  getPointBoundsInScreenSelection,
+} from "./geometry";
 import type { Point } from "./points";
+
+interface SelectionRegion {
+  min: Point;
+  max: Point;
+  cube: THREE.Mesh;
+}
 
 function getRootElement(): HTMLElement {
   const root = document.getElementById("scene-root");
@@ -71,6 +82,136 @@ function bindResize(
   });
 }
 
+function bindRegionSelection(
+  root: HTMLElement,
+  scene: THREE.Scene,
+  camera: THREE.PerspectiveCamera,
+  renderer: THREE.WebGLRenderer,
+  controls: OrbitControls,
+  points: Point[],
+): void {
+  root.style.position = "relative";
+
+  const overlay = document.createElement("div");
+  overlay.style.position = "absolute";
+  overlay.style.pointerEvents = "none";
+  overlay.style.border = "1px solid #22d3ee";
+  overlay.style.background = "rgba(34, 211, 238, 0.2)";
+  overlay.style.display = "none";
+  root.appendChild(overlay);
+
+  const regions: SelectionRegion[] = [];
+
+  let isSelecting = false;
+  let pointerId = -1;
+  let startX = 0;
+  let startY = 0;
+  let currentX = 0;
+  let currentY = 0;
+
+  function updateOverlay(): void {
+    const minX = Math.min(startX, currentX);
+    const maxX = Math.max(startX, currentX);
+    const minY = Math.min(startY, currentY);
+    const maxY = Math.max(startY, currentY);
+
+    overlay.style.left = `${minX}px`;
+    overlay.style.top = `${minY}px`;
+    overlay.style.width = `${maxX - minX}px`;
+    overlay.style.height = `${maxY - minY}px`;
+  }
+
+  function getCanvasPosition(event: PointerEvent): { x: number; y: number } {
+    const rect = renderer.domElement.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  }
+
+  function finishSelection(event: PointerEvent): void {
+    if (!isSelecting || event.pointerId !== pointerId) {
+      return;
+    }
+
+    isSelecting = false;
+    controls.enabled = true;
+    overlay.style.display = "none";
+
+    if (renderer.domElement.hasPointerCapture(pointerId)) {
+      renderer.domElement.releasePointerCapture(pointerId);
+    }
+
+    const minX = Math.min(startX, currentX);
+    const maxX = Math.max(startX, currentX);
+    const minY = Math.min(startY, currentY);
+    const maxY = Math.max(startY, currentY);
+
+    if (maxX - minX < 2 || maxY - minY < 2) {
+      return;
+    }
+
+    const bounds = getPointBoundsInScreenSelection(
+      points,
+      camera,
+      renderer.domElement.clientWidth,
+      renderer.domElement.clientHeight,
+      { minX, maxX, minY, maxY },
+    );
+
+    if (!bounds) {
+      return;
+    }
+
+    const cube = addSelectionCube(scene, bounds);
+    regions.push({
+      min: { x: bounds.min.x, y: bounds.min.y, z: bounds.min.z },
+      max: { x: bounds.max.x, y: bounds.max.y, z: bounds.max.z },
+      cube,
+    });
+  }
+
+  renderer.domElement.addEventListener(
+    "pointerdown",
+    (event: PointerEvent) => {
+      if (!event.shiftKey || event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const position = getCanvasPosition(event);
+      isSelecting = true;
+      pointerId = event.pointerId;
+      startX = position.x;
+      startY = position.y;
+      currentX = position.x;
+      currentY = position.y;
+
+      controls.enabled = false;
+      updateOverlay();
+      overlay.style.display = "block";
+      renderer.domElement.setPointerCapture(pointerId);
+    },
+    { capture: true },
+  );
+
+  renderer.domElement.addEventListener("pointermove", (event: PointerEvent) => {
+    if (!isSelecting || event.pointerId !== pointerId) {
+      return;
+    }
+
+    const position = getCanvasPosition(event);
+    currentX = position.x;
+    currentY = position.y;
+    updateOverlay();
+  });
+
+  renderer.domElement.addEventListener("pointerup", finishSelection);
+  renderer.domElement.addEventListener("pointercancel", finishSelection);
+}
+
 function startRenderLoop(
   scene: THREE.Scene,
   camera: THREE.PerspectiveCamera,
@@ -107,6 +248,7 @@ async function main(): Promise<void> {
   addLights(scene);
   addPointCloud(scene, points);
   fitCameraToPointCloud(camera, controls, points);
+  bindRegionSelection(root, scene, camera, renderer, controls, points);
 
   bindResize(camera, renderer);
   startRenderLoop(scene, camera, renderer, controls);
