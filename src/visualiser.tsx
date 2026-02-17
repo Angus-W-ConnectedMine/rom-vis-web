@@ -129,7 +129,7 @@ export function Visualiser() {
   const pendingPrismRef = useRef<THREE.Group | null>(null);
   const regionKeyRef = useRef(1);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
-  const [selectedRegionKey, setSelectedRegionKey] = useState<number | null>(null);
+  const [selectedRegionKeys, setSelectedRegionKeys] = useState<number[]>([]);
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [pendingSelection, setPendingSelection] = useState<PendingRegionDraft | null>(null);
   const [status, setStatus] = useState("Loading points...");
@@ -238,7 +238,9 @@ export function Visualiser() {
         return;
       }
 
-      setSelectedRegionKey(key);
+      setSelectedRegionKeys((prev) =>
+        prev.includes(key) ? prev.filter((value) => value !== key) : [...prev, key],
+      );
     };
 
     window.addEventListener("resize", resize);
@@ -299,7 +301,7 @@ export function Visualiser() {
       pointOffsetRef.current = { x: 0, y: 0, z: 0 };
       pendingPrismRef.current = null;
       setPendingSelection(null);
-      setSelectedRegionKey(null);
+      setSelectedRegionKeys([]);
       setInteractionElement(null);
     };
   }, []);
@@ -406,7 +408,9 @@ export function Visualiser() {
         max: pending.max,
       },
     ]);
-    setSelectedRegionKey(key);
+    setSelectedRegionKeys((prev) =>
+      prev.includes(key) ? prev : [...prev, key],
+    );
     setPendingSelection(null);
     setStatus("Region saved.");
   }, [pendingSelection]);
@@ -423,9 +427,10 @@ export function Visualiser() {
     setStatus("Region selection cancelled.");
   }, []);
 
-  const applyRegionSelectionVisuals = useCallback((selectedKey: number | null): void => {
+  const applyRegionSelectionVisuals = useCallback((selectedKeys: number[]): void => {
+    const selected = new Set(selectedKeys);
     for (const regionPrism of regionPrismsRef.current) {
-      const isSelected = selectedKey !== null && regionPrism.key === selectedKey;
+      const isSelected = selected.has(regionPrism.key);
       regionPrism.prism.traverse((node) => {
         if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshBasicMaterial) {
           node.material.color.setHex(isSelected ? REGION_SELECTED_COLOR : REGION_DEFAULT_COLOR);
@@ -442,12 +447,14 @@ export function Visualiser() {
   }, []);
 
   const handleSelectRegion = useCallback((key: number): void => {
-    setSelectedRegionKey(key);
+    setSelectedRegionKeys((prev) =>
+      prev.includes(key) ? prev.filter((value) => value !== key) : [...prev, key],
+    );
   }, []);
 
   useEffect(() => {
-    applyRegionSelectionVisuals(selectedRegionKey);
-  }, [selectedRegionKey, applyRegionSelectionVisuals, regions.length]);
+    applyRegionSelectionVisuals(selectedRegionKeys);
+  }, [selectedRegionKeys, applyRegionSelectionVisuals, regions.length]);
 
   const handleDeleteRegion = useCallback((key: number): void => {
     const scene = sceneRef.current;
@@ -465,21 +472,11 @@ export function Visualiser() {
     }
     regionPrismsRef.current = nextRegionPrisms;
     setRegions((prev) => prev.filter((region) => region.key !== key));
-    setSelectedRegionKey((prev) => (prev === key ? null : prev));
+    setSelectedRegionKeys((prev) => prev.filter((value) => value !== key));
   }, []);
 
-  const handleClearRegions = useCallback((): void => {
-    const scene = sceneRef.current;
-    if (!scene) {
-      return;
-    }
-
-    for (const regionPrism of regionPrismsRef.current) {
-      scene.remove(regionPrism.prism);
-    }
-    regionPrismsRef.current = [];
-    setRegions([]);
-    setSelectedRegionKey(null);
+  const handleClearSelections = useCallback((): void => {
+    setSelectedRegionKeys([]);
   }, []);
 
   return (
@@ -498,10 +495,10 @@ export function Visualiser() {
         status={status}
         regions={regions}
         latestRegion={latestRegion}
-        selectedRegionKey={selectedRegionKey}
+        selectedRegionKeys={selectedRegionKeys}
         onSelectRegion={handleSelectRegion}
         onDeleteRegion={handleDeleteRegion}
-        onClearRegions={handleClearRegions}
+        onClearSelections={handleClearSelections}
       />
     </div>
   );

@@ -41,10 +41,10 @@ interface OverlayProps {
   status: string;
   regions: RegionMeta[];
   latestRegion: RegionMeta | null;
-  selectedRegionKey: number | null;
+  selectedRegionKeys: number[];
   onSelectRegion: (key: number) => void;
   onDeleteRegion: (key: number) => void;
-  onClearRegions: () => void;
+  onClearSelections: () => void;
 }
 
 export function Overlay(props: OverlayProps) {
@@ -61,10 +61,10 @@ export function Overlay(props: OverlayProps) {
     status,
     regions,
     latestRegion,
-    selectedRegionKey,
+    selectedRegionKeys,
     onSelectRegion,
     onDeleteRegion,
-    onClearRegions,
+    onClearSelections,
   } = props;
   const pointerIdRef = useRef<number | null>(null);
   const selectionRectRef = useRef<SelectionRect | null>(null);
@@ -205,7 +205,7 @@ export function Overlay(props: OverlayProps) {
             {regions.map((region) => (
               <div
                 key={region.key}
-                className={`overlay-region-item${selectedRegionKey === region.key ? " is-selected" : ""}`}
+                className={`overlay-region-item${selectedRegionKeys.includes(region.key) ? " is-selected" : ""}`}
                 onClick={() => onSelectRegion(region.key)}
                 role="button"
                 tabIndex={0}
@@ -226,7 +226,7 @@ export function Overlay(props: OverlayProps) {
                       onDeleteRegion(region.key);
                     }}
                   >
-                    Delete
+                    x
                   </button>
                 </div>
                 <div className="overlay-region-meta">
@@ -241,10 +241,10 @@ export function Overlay(props: OverlayProps) {
           <button
             className="btn"
             type="button"
-            onClick={onClearRegions}
+            onClick={onClearSelections}
             disabled={regions.length === 0}
           >
-            Clear All
+            Clear
           </button>
         </div>
       </aside>
