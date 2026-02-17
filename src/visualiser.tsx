@@ -408,9 +408,6 @@ export function Visualiser() {
         max: pending.max,
       },
     ]);
-    setSelectedRegionKeys((prev) =>
-      prev.includes(key) ? prev : [...prev, key],
-    );
     setPendingSelection(null);
     setStatus("Region saved.");
   }, [pendingSelection]);
