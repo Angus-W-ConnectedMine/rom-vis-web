@@ -1,0 +1,391 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import {
+  addPointCloud,
+  addSelectionPrism,
+  fitCameraToPointCloud,
+  getPointsInScreenSelection,
+} from "./geometry";
+import type { Point } from "./points";
+
+interface RegionMeta {
+  id: number;
+  pointCount: number;
+  min: Point;
+  max: Point;
+}
+
+interface SelectionRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function createScene(): THREE.Scene {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0f172a);
+  return scene;
+}
+
+function createCamera(width: number, height: number): THREE.PerspectiveCamera {
+  const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+  camera.position.set(0, 6, 24);
+  camera.up.set(0, 0, 1);
+  return camera;
+}
+
+function createRenderer(container: HTMLElement): THREE.WebGLRenderer {
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+  return renderer;
+}
+
+function addLights(scene: THREE.Scene): void {
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const directional = new THREE.DirectionalLight(0xffffff, 1.2);
+  directional.position.set(6, 8, 10);
+  scene.add(directional);
+}
+
+async function getPoints(): Promise<Point[]> {
+  const response = await fetch("/points");
+  if (!response.ok) {
+    throw new Error(`Failed to load points: ${response.status}`);
+  }
+  return (await response.json()) as Point[];
+}
+
+function getRegionMinMax(points: Point[]): { min: Point; max: Point } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.z < minZ) minZ = point.z;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+    if (point.z > maxZ) maxZ = point.z;
+  }
+
+  return {
+    min: { x: minX, y: minY, z: minZ },
+    max: { x: maxX, y: maxY, z: maxZ },
+  };
+}
+
+function App() {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const regionIdRef = useRef(1);
+  const [regions, setRegions] = useState<RegionMeta[]>([]);
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
+  const [status, setStatus] = useState("Loading points...");
+
+  const latestRegion = useMemo(() => {
+    if (regions.length === 0) {
+      return null;
+    }
+    return regions[regions.length - 1] as RegionMeta;
+  }, [regions]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    let disposed = false;
+    let frameId = 0;
+
+    const scene = createScene();
+    const camera = createCamera(viewport.clientWidth, viewport.clientHeight);
+    const renderer = createRenderer(viewport);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.update();
+    addLights(scene);
+
+    const regionPrisms: THREE.Group[] = [];
+
+    const resize = (): void => {
+      if (disposed) {
+        return;
+      }
+      const width = viewport.clientWidth;
+      const height = viewport.clientHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+    };
+
+    const animate = (): void => {
+      if (disposed) {
+        return;
+      }
+      controls.update();
+      renderer.render(scene, camera);
+      frameId = requestAnimationFrame(animate);
+    };
+
+    let points: Point[] = [];
+    let isSelecting = false;
+    let pointerId = -1;
+    let startX = 0;
+    let startY = 0;
+    let currentX = 0;
+    let currentY = 0;
+
+    const updateSelectionRect = (): void => {
+      const minX = Math.min(startX, currentX);
+      const minY = Math.min(startY, currentY);
+      const maxX = Math.max(startX, currentX);
+      const maxY = Math.max(startY, currentY);
+      setSelectionRect({
+        left: minX,
+        top: minY,
+        width: maxX - minX,
+        height: maxY - minY,
+      });
+    };
+
+    const getCanvasPosition = (event: PointerEvent): { x: number; y: number } => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+    };
+
+    const finishSelection = (event: PointerEvent): void => {
+      if (!isSelecting || event.pointerId !== pointerId) {
+        return;
+      }
+
+      isSelecting = false;
+      controls.enabled = true;
+      setSelectionRect(null);
+
+      if (renderer.domElement.hasPointerCapture(pointerId)) {
+        renderer.domElement.releasePointerCapture(pointerId);
+      }
+
+      const minX = Math.min(startX, currentX);
+      const maxX = Math.max(startX, currentX);
+      const minY = Math.min(startY, currentY);
+      const maxY = Math.max(startY, currentY);
+
+      if (maxX - minX < 2 || maxY - minY < 2 || points.length === 0) {
+        return;
+      }
+
+      const selectedPoints = getPointsInScreenSelection(
+        points,
+        camera,
+        renderer.domElement.clientWidth,
+        renderer.domElement.clientHeight,
+        { minX, maxX, minY, maxY },
+      );
+
+      if (selectedPoints.length === 0) {
+        return;
+      }
+
+      const prism = addSelectionPrism(scene, selectedPoints, 20);
+      if (!prism) {
+        return;
+      }
+
+      regionPrisms.push(prism);
+      const region = getRegionMinMax(selectedPoints);
+      const id = regionIdRef.current;
+      regionIdRef.current += 1;
+
+      setRegions((prev) => [
+        ...prev,
+        {
+          id,
+          pointCount: selectedPoints.length,
+          min: region.min,
+          max: region.max,
+        },
+      ]);
+    };
+
+    const onPointerDown = (event: PointerEvent): void => {
+      if (!event.shiftKey || event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const position = getCanvasPosition(event);
+
+      isSelecting = true;
+      pointerId = event.pointerId;
+      startX = position.x;
+      startY = position.y;
+      currentX = position.x;
+      currentY = position.y;
+      controls.enabled = false;
+      updateSelectionRect();
+      renderer.domElement.setPointerCapture(pointerId);
+    };
+
+    const onPointerMove = (event: PointerEvent): void => {
+      if (!isSelecting || event.pointerId !== pointerId) {
+        return;
+      }
+      const position = getCanvasPosition(event);
+      currentX = position.x;
+      currentY = position.y;
+      updateSelectionRect();
+    };
+
+    const onPointerUp = (event: PointerEvent): void => {
+      finishSelection(event);
+    };
+
+    const onPointerCancel = (event: PointerEvent): void => {
+      finishSelection(event);
+    };
+
+    window.addEventListener("resize", resize);
+    renderer.domElement.addEventListener("pointerdown", onPointerDown, {
+      capture: true,
+    });
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("pointerup", onPointerUp);
+    renderer.domElement.addEventListener("pointercancel", onPointerCancel);
+
+    void (async () => {
+      try {
+        points = await getPoints();
+        if (disposed) {
+          return;
+        }
+
+        addPointCloud(scene, points);
+        fitCameraToPointCloud(camera, controls, points);
+        setStatus(
+          "Shift + drag to select. Region details panel is a placeholder for now.",
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(`Failed to initialize scene: ${message}`);
+      } finally {
+        if (!disposed) {
+          animate();
+        }
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frameId);
+
+      window.removeEventListener("resize", resize);
+      renderer.domElement.removeEventListener("pointerdown", onPointerDown, {
+        capture: true,
+      });
+      renderer.domElement.removeEventListener("pointermove", onPointerMove);
+      renderer.domElement.removeEventListener("pointerup", onPointerUp);
+      renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
+
+      for (const prism of regionPrisms) {
+        scene.remove(prism);
+      }
+      controls.dispose();
+      renderer.dispose();
+      renderer.domElement.remove();
+    };
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+      }}
+    >
+      <div ref={viewportRef} style={{ width: "100%", height: "100%" }} />
+      {selectionRect ? (
+        <div
+          style={{
+            position: "absolute",
+            left: selectionRect.left,
+            top: selectionRect.top,
+            width: selectionRect.width,
+            height: selectionRect.height,
+            pointerEvents: "none",
+            border: "1px solid #22d3ee",
+            background: "rgba(34, 211, 238, 0.2)",
+          }}
+        />
+      ) : null}
+      <aside
+        style={{
+          position: "absolute",
+          right: 12,
+          top: 12,
+          width: 320,
+          padding: 12,
+          borderRadius: 8,
+          background: "rgba(15, 23, 42, 0.82)",
+          border: "1px solid rgba(148, 163, 184, 0.3)",
+          color: "#e2e8f0",
+          fontFamily: "ui-sans-serif, system-ui, sans-serif",
+          fontSize: 13,
+          lineHeight: 1.4,
+        }}
+      >
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Overlay Placeholder</div>
+        <div style={{ opacity: 0.9, marginBottom: 10 }}>{status}</div>
+        <div style={{ marginBottom: 8 }}>
+          Regions selected: <strong>{regions.length}</strong>
+        </div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>Latest region (placeholder)</div>
+        <pre
+          style={{
+            margin: 0,
+            padding: 8,
+            borderRadius: 6,
+            background: "rgba(2, 6, 23, 0.7)",
+            overflowX: "auto",
+          }}
+        >
+          {latestRegion
+            ? JSON.stringify(
+                {
+                  id: latestRegion.id,
+                  pointCount: latestRegion.pointCount,
+                  min: latestRegion.min,
+                  max: latestRegion.max,
+                },
+                null,
+                2,
+              )
+            : "No selections yet"}
+        </pre>
+      </aside>
+    </div>
+  );
+}
+
+const mountNode = document.getElementById("scene-root");
+if (!mountNode) {
+  throw new Error("Missing #scene-root element");
+}
+
+createRoot(mountNode).render(<App />);
