@@ -45,21 +45,29 @@ function addLights(scene: THREE.Scene): void {
   scene.add(directional);
 }
 
-function addSpheres(scene: THREE.Scene): void {
-  const sphereGeometry = new THREE.SphereGeometry(0.8, 32, 32);
-  const sphereMaterial = new THREE.MeshStandardMaterial({
+function addPointCloud(scene: THREE.Scene): void {
+  const count = 200_000;
+  const spread = 160;
+  const positions = new Float32Array(count * 3);
+
+  for (let i = 0; i < count; i += 1) {
+    const offset = i * 3;
+    positions[offset] = (Math.random() - 0.5) * spread;
+    positions[offset + 1] = (Math.random() - 0.5) * spread;
+    positions[offset + 2] = (Math.random() - 0.5) * spread;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+  const material = new THREE.PointsMaterial({
     color: 0x2563eb,
-    roughness: 0.35,
-    metalness: 0.15,
+    size: 0.35,
+    sizeAttenuation: true,
   });
 
-  const count = 10;
-  const spacing = 2.2;
-  for (let i = 0; i < count; i += 1) {
-    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-    sphere.position.set((i - (count - 1) / 2) * spacing, 0, 0);
-    scene.add(sphere);
-  }
+  const pointCloud = new THREE.Points(geometry, material);
+  scene.add(pointCloud);
 }
 
 function createControls(
@@ -68,10 +76,6 @@ function createControls(
 ): OrbitControls {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0, 0);
-  controls.minDistance = 8;
-  controls.maxDistance = 60;
-  controls.minPolarAngle = Math.PI / 2 - 1.3;
-  controls.maxPolarAngle = Math.PI / 2 + 1.3;
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.update();
@@ -111,7 +115,7 @@ function main(): void {
   const renderer = createRenderer(root);
 
   addLights(scene);
-  addSpheres(scene);
+  addPointCloud(scene);
 
   const controls = createControls(camera, renderer);
   bindResize(camera, renderer);
