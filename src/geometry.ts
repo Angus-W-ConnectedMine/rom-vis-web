@@ -9,8 +9,37 @@ export interface ScreenSelectionRect {
   maxY: number;
 }
 
+// Keep this as a constant so we can wire to UI/config later.
+export const POINT_COLOR_STEPS = [
+  0x991b1b, // Red
+  0xdc2626,
+  0xea580c,
+  0xca8a04,
+  0x65a30d,
+  0x16a34a, // Green
+] as const;
+
+function getColorStepIndex(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value) || max <= min) {
+    return 0;
+  }
+
+  const normalized = THREE.MathUtils.clamp((value - min) / (max - min), 0, 1);
+  const steps = POINT_COLOR_STEPS.length;
+  return Math.min(Math.floor(normalized * steps), steps - 1);
+}
+
 export function addPointCloud(scene: THREE.Scene, points: Point[]): THREE.Points {
   const positions = new Float32Array(points.length * 3);
+  const colors = new Float32Array(points.length * 3);
+  const color = new THREE.Color();
+
+  let minW = Infinity;
+  let maxW = -Infinity;
+  for (const point of points) {
+    if (point.w < minW) minW = point.w;
+    if (point.w > maxW) maxW = point.w;
+  }
 
   for (let i = 0; i < points.length; i += 1) {
     const point = points[i];
@@ -21,13 +50,20 @@ export function addPointCloud(scene: THREE.Scene, points: Point[]): THREE.Points
     positions[i * 3 + 0] = point.x;
     positions[i * 3 + 1] = point.y;
     positions[i * 3 + 2] = point.z;
+
+    const colorIndex = getColorStepIndex(point.w, minW, maxW);
+    color.setHex(POINT_COLOR_STEPS[colorIndex] as number);
+    colors[i * 3 + 0] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
   const material = new THREE.PointsMaterial({
-    color: 0x2563eb,
+    vertexColors: true,
     size: 1,
     sizeAttenuation: true,
   });
@@ -207,13 +243,12 @@ function getConvexHullXY(points: Point[]): THREE.Vector2[] {
   }
 
   const lower: THREE.Vector2[] = [];
+
   for (const point of unique) {
-    while (
-      lower.length >= 2 &&
-      cross2D(lower[lower.length - 2] as THREE.Vector2, lower[lower.length - 1] as THREE.Vector2, point) <= 0
-    ) {
+    while (lower.length >= 2 && cross2D(lower[lower.length - 2] as THREE.Vector2, lower[lower.length - 1] as THREE.Vector2, point) <= 0) {
       lower.pop();
     }
+
     lower.push(point);
   }
 
@@ -234,7 +269,7 @@ function getConvexHullXY(points: Point[]): THREE.Vector2[] {
   return lower.concat(upper);
 }
 
-function getFallbackFootprint(points: Point[]): THREE.Vector2[] {
+function getRectangularFootprint(points: Point[]): THREE.Vector2[] {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -319,7 +354,7 @@ function getPrismFootprint(points: Point[], maxVertices: number): THREE.Vector2[
     return rough;
   }
 
-  return getFallbackFootprint(points);
+  return getRectangularFootprint(points);
 }
 
 export function addSelectionPrism(

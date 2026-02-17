@@ -50,26 +50,30 @@ function getRegionMinMax(points: Point[]): { min: Point; max: Point } {
   let minX = Infinity;
   let minY = Infinity;
   let minZ = Infinity;
+  let minW = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
   let maxZ = -Infinity;
+  let maxW = -Infinity;
 
   for (const point of points) {
     if (point.x < minX) minX = point.x;
     if (point.y < minY) minY = point.y;
     if (point.z < minZ) minZ = point.z;
+    if (point.w < minW) minW = point.w;
     if (point.x > maxX) maxX = point.x;
     if (point.y > maxY) maxY = point.y;
     if (point.z > maxZ) maxZ = point.z;
+    if (point.w > maxW) maxW = point.w;
   }
 
   return {
-    min: { x: minX, y: minY, z: minZ },
-    max: { x: maxX, y: maxY, z: maxZ },
+    min: { x: minX, y: minY, z: minZ, w: minW },
+    max: { x: maxX, y: maxY, z: maxZ, w: maxW },
   };
 }
 
-function getPointCloudOffset(points: Point[]): Point {
+function getPointCloudOffset(points: Point[]): { x: number; y: number; z: number } {
   if (points.length === 0) {
     return { x: 0, y: 0, z: 0 };
   }
@@ -99,7 +103,7 @@ export function Visualiser() {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const pointsRef = useRef<Point[]>([]);
-  const pointOffsetRef = useRef<Point>({ x: 0, y: 0, z: 0 });
+  const pointOffsetRef = useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   const regionPrismsRef = useRef<THREE.Group[]>([]);
   const regionIdRef = useRef(1);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
@@ -173,6 +177,7 @@ export function Visualiser() {
           x: point.x - pointOffset.x,
           y: point.y - pointOffset.y,
           z: point.z - pointOffset.z,
+          w: point.w,
         }));
 
         pointOffsetRef.current = pointOffset;
@@ -271,11 +276,13 @@ export function Visualiser() {
           x: region.min.x + pointOffset.x,
           y: region.min.y + pointOffset.y,
           z: region.min.z + pointOffset.z,
+          w: region.min.w,
         },
         max: {
           x: region.max.x + pointOffset.x,
           y: region.max.y + pointOffset.y,
           z: region.max.z + pointOffset.z,
+          w: region.max.w,
         },
       },
     ]);

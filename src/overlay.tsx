@@ -196,15 +196,15 @@ export function Overlay(props: OverlayProps) {
         >
           {latestRegion
             ? JSON.stringify(
-                {
-                  id: latestRegion.id,
-                  pointCount: latestRegion.pointCount,
-                  min: latestRegion.min,
-                  max: latestRegion.max,
-                },
-                null,
-                2,
-              )
+              {
+                id: latestRegion.id,
+                pointCount: latestRegion.pointCount,
+                min: latestRegion.min,
+                max: latestRegion.max,
+              },
+              null,
+              2,
+            )
             : "No selections yet"}
         </pre>
       </aside>
