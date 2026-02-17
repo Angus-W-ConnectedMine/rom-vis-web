@@ -5,7 +5,7 @@ const server = serve({
   port: 8080,
 
   routes: {
-      "/": index,
+      "/": index
   }
 });
 
