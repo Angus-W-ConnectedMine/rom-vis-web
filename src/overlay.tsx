@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { Point } from "./points";
 import { RegionFormModal } from "./regionFormModal";
 
@@ -47,6 +48,22 @@ export function Overlay(props: OverlayProps) {
     onDeleteRegion,
     onClearSelections,
   } = props;
+  const regionItemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const previousSelectedRegionKeysRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    const previousSelectedRegionKeys = previousSelectedRegionKeysRef.current;
+    const newlySelectedKey = selectedRegionKeys.find(
+      (key) => !previousSelectedRegionKeys.includes(key),
+    );
+
+    if (newlySelectedKey !== undefined) {
+      const regionItem = regionItemRefs.current.get(newlySelectedKey);
+      regionItem?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    previousSelectedRegionKeysRef.current = selectedRegionKeys;
+  }, [selectedRegionKeys]);
 
   return (
     <>
@@ -73,6 +90,13 @@ export function Overlay(props: OverlayProps) {
               <div
                 key={region.key}
                 className={`overlay-region-item${selectedRegionKeys.includes(region.key) ? " is-selected" : ""}`}
+                ref={(node) => {
+                  if (node) {
+                    regionItemRefs.current.set(region.key, node);
+                  } else {
+                    regionItemRefs.current.delete(region.key);
+                  }
+                }}
                 onClick={() => onSelectRegion(region.key)}
                 role="button"
                 tabIndex={0}

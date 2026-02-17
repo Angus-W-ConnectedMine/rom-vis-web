@@ -4,7 +4,7 @@ import type { SelectionRect } from "./overlay";
 interface UseSelectionControllerOptions {
   interactionElement: HTMLCanvasElement | null;
   selectionEnabled: boolean;
-  onSelectionActiveChange: (value: boolean) => void;
+  onCurrentlySelectingChange: (value: boolean) => void;
   onSelectionComplete: (value: SelectionRect) => void;
 }
 
@@ -18,7 +18,7 @@ export function useSelectionController(
   const {
     interactionElement,
     selectionEnabled,
-    onSelectionActiveChange,
+    onCurrentlySelectingChange,
     onSelectionComplete,
   } = options;
 
@@ -68,7 +68,7 @@ export function useSelectionController(
       }
 
       const completedRect = selectionRectRef.current;
-      onSelectionActiveChange(false);
+      onCurrentlySelectingChange(false);
       setSelectionRect(null);
       pointerIdRef.current = null;
 
@@ -97,7 +97,7 @@ export function useSelectionController(
       startY = position.y;
       currentX = position.x;
       currentY = position.y;
-      onSelectionActiveChange(true);
+      onCurrentlySelectingChange(true);
       pointerIdRef.current = event.pointerId;
       setRect();
       element.setPointerCapture(event.pointerId);
@@ -127,7 +127,7 @@ export function useSelectionController(
     };
   }, [
     interactionElement,
-    onSelectionActiveChange,
+    onCurrentlySelectingChange,
     onSelectionComplete,
     selectionEnabled,
   ]);

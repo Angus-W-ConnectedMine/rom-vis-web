@@ -287,12 +287,15 @@ export function Visualiser() {
     };
   }, []);
 
-  const handleSelectionActiveChange = useCallback((active: boolean): void => {
+  // Disable controls while selecting to prevent conflicts
+  const onCurrentlySelectingChange = useCallback((currentlySelecting: boolean): void => {
     const controls = controlsRef.current;
+
     if (!controls) {
       return;
     }
-    controls.enabled = !active;
+
+    controls.enabled = !currentlySelecting;
   }, []);
 
   const handleSelectionComplete = useCallback((rect: SelectionRect): void => {
@@ -372,7 +375,7 @@ export function Visualiser() {
   const { selectionRect } = useSelectionController({
     interactionElement,
     selectionEnabled: editingRegionKey === null,
-    onSelectionActiveChange: handleSelectionActiveChange,
+    onCurrentlySelectingChange,
     onSelectionComplete: handleSelectionComplete,
   });
 
@@ -389,9 +392,9 @@ export function Visualiser() {
       prev.map((region) =>
         region.key === key
           ? {
-              ...region,
-              regionId,
-            }
+            ...region,
+            regionId,
+          }
           : region,
       ),
     );
