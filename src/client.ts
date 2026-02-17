@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import type { Point } from "./points";
 
 function getRootElement(): HTMLElement {
   const root = document.getElementById("scene-root");
@@ -45,16 +46,20 @@ function addLights(scene: THREE.Scene): void {
   scene.add(directional);
 }
 
-function addPointCloud(scene: THREE.Scene): void {
-  const count = 200_000;
-  const spread = 160;
-  const positions = new Float32Array(count * 3);
+async function addPointCloud(scene: THREE.Scene): Promise<void> {
+  const response = await fetch("/points");
+  const points = await response.json() as Point[];
 
-  for (let i = 0; i < count; i += 1) {
-    const offset = i * 3;
-    positions[offset] = (Math.random() - 0.5) * spread;
-    positions[offset + 1] = (Math.random() - 0.5) * spread;
-    positions[offset + 2] = (Math.random() - 0.5) * spread;
+  const positions = new Float32Array(points.length * 3);
+  
+  for (let i = 0; i < points.length; i += 1) {
+    const point = points[i];
+
+    if (!point) continue;
+
+    positions[i * 3 + 0] = point.x;
+    positions[i * 3 + 1] = point.y;
+    positions[i * 3 + 2] = point.z;
   }
 
   const geometry = new THREE.BufferGeometry();
