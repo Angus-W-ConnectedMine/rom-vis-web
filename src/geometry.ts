@@ -512,7 +512,7 @@ function addPrismFromSnapshot(
   return prism;
 }
 
-export function toStoredPrism(key: number, regionId: string, snapshot: PrismSnapshot): StoredPrism {
+export function toStoredPrism(key: string, regionId: string, snapshot: PrismSnapshot): StoredPrism {
   return {
     key,
     regionId,
@@ -577,3 +577,84 @@ export function addSelectionPrism(
     footprint: footprint.map((point) => ({ x: point.x, y: point.y })),
   });
 }
+export function getDistanceToPrismEdge(
+  snapshot: PrismSnapshot,
+  center: THREE.Vector3,
+  outward: THREE.Vector3): number {
+  const footprint = snapshot.footprint;
+  if (footprint.length < 3) {
+    return 0;
+  }
+
+  const rayOrigin = new THREE.Vector2(center.x, center.y);
+  const rayDirection = new THREE.Vector2(outward.x, outward.y).normalize();
+  let minDistance = Infinity;
+
+  for (let i = 0; i < footprint.length; i += 1) {
+    const current = footprint[i];
+    const next = footprint[(i + 1) % footprint.length];
+    if (!current || !next) {
+      continue;
+    }
+
+    const edgeStart = new THREE.Vector2(current.x, current.y);
+    const edgeVector = new THREE.Vector2(next.x - current.x, next.y - current.y);
+    const denom = cross2(rayDirection, edgeVector);
+    if (Math.abs(denom) < 1e-8) {
+      continue;
+    }
+
+    const originToEdge = edgeStart.clone().sub(rayOrigin);
+    const rayT = cross2(originToEdge, edgeVector) / denom;
+    const edgeT = cross2(originToEdge, rayDirection) / denom;
+
+    if (rayT >= 0 && edgeT >= 0 && edgeT <= 1 && rayT < minDistance) {
+      minDistance = rayT;
+    }
+  }
+
+  if (Number.isFinite(minDistance)) {
+    return minDistance;
+  }
+
+  return getPlanArrowLength(snapshot) * 0.5;
+}
+
+export function cross2(a: THREE.Vector2, b: THREE.Vector2): number {
+  return a.x * b.y - a.y * b.x;
+}
+
+export function getPlanArrowLength(snapshot: PrismSnapshot): number {
+  const center = getRegionCenter(snapshot);
+  let maxRadius = 0;
+
+  for (const point of snapshot.footprint) {
+    const dx = point.x - center.x;
+    const dy = point.y - center.y;
+    const radius = Math.sqrt(dx * dx + dy * dy);
+    if (radius > maxRadius) {
+      maxRadius = radius;
+    }
+  }
+
+  return Math.max(2, maxRadius * 1.8);
+}
+
+export function getRegionCenter(snapshot: PrismSnapshot): THREE.Vector3 {
+  let sumX = 0;
+  let sumY = 0;
+  const footprintCount = snapshot.footprint.length;
+
+  for (const point of snapshot.footprint) {
+    sumX += point.x;
+    sumY += point.y;
+  }
+
+  const count = Math.max(footprintCount, 1);
+  return new THREE.Vector3(
+    sumX / count,
+    sumY / count,
+    (snapshot.minZ + snapshot.maxZ) * 0.5
+  );
+}
+

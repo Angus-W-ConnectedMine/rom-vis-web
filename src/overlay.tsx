@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Point } from "./points";
 import { RegionFormModal } from "./regionFormModal";
+import OperationalPlan, { type PlanItem } from "./OperationPlan";
 
 export interface SelectionRect {
   left: number;
@@ -10,7 +11,7 @@ export interface SelectionRect {
 }
 
 export interface RegionMeta {
-  key: number;
+  key: string;
   regionId: string;
   pointCount: number;
   minW: number;
@@ -23,18 +24,21 @@ export interface RegionMeta {
 interface OverlayProps {
   selectionRect: SelectionRect | null;
   editingRegion: RegionMeta | null;
-  onSaveRegionEdit: (key: number, regionId: string) => void;
+  onSaveRegionEdit: (key: string, regionId: string) => void;
   onCancelRegionEdit: () => void;
-  onRequestRegionEdit: (key: number) => void;
+  onRequestRegionEdit: (key: string) => void;
   status: string;
   regions: RegionMeta[];
-  selectedRegionKeys: number[];
-  onSelectRegion: (key: number) => void;
-  onDeleteRegion: (key: number) => void;
+  selectedRegionKeys: string[];
+  onSelectRegion: (key: string) => void;
+  onDeleteRegion: (key: string) => void;
   onClearSelections: () => void;
+  plan: PlanItem[];
+  onAddRegionToPlan: (region: RegionMeta) => void;
+  onUpdatePlanAngle: (planItemId: string, angle: number) => void;
 }
 
-function getSummary(regions: RegionMeta[], selectedRegionKeys: number[]) {
+function getSummary(regions: RegionMeta[], selectedRegionKeys: string[]) {
   const selectedRegions = regions.filter((region) => selectedRegionKeys.includes(region.key));
   const totalPoints = selectedRegions.reduce((sum, region) => sum + region.pointCount, 0);
   const averageW =
@@ -58,9 +62,12 @@ export function Overlay(props: OverlayProps) {
     onSelectRegion,
     onDeleteRegion,
     onClearSelections,
+    plan,
+    onAddRegionToPlan,
+    onUpdatePlanAngle,
   } = props;
-  const regionItemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const previousSelectedRegionKeysRef = useRef<number[]>([]);
+  const regionItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const previousSelectedRegionKeysRef = useRef<string[]>([]);
 
   useEffect(() => {
     const previousSelectedRegionKeys = previousSelectedRegionKeysRef.current;
@@ -75,6 +82,8 @@ export function Overlay(props: OverlayProps) {
 
     previousSelectedRegionKeysRef.current = selectedRegionKeys;
   }, [selectedRegionKeys]);
+
+  const selectedRegions = regions.filter((region) => selectedRegionKeys.includes(region.key));
 
   const summary = getSummary(regions, selectedRegionKeys);
 
@@ -153,9 +162,8 @@ export function Overlay(props: OverlayProps) {
           </div>
         )}
 
-        <div className="overlay-toolbar">
+        <div className="toolbar">
           <button
-            className="btn"
             type="button"
             onClick={onClearSelections}
             disabled={regions.length === 0}
@@ -175,6 +183,14 @@ export function Overlay(props: OverlayProps) {
             <span>{summary.averageW.toFixed(3)}</span>
           </div>
         </div>
+
+        <OperationalPlan
+          addableRegions={selectedRegions}
+          allRegions={regions}
+          plan={plan}
+          onAddRegionToPlan={onAddRegionToPlan}
+          onUpdatePlanAngle={onUpdatePlanAngle}
+        />
       </aside>
 
       {editingRegion ? (
