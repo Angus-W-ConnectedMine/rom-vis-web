@@ -34,6 +34,17 @@ interface OverlayProps {
   onClearSelections: () => void;
 }
 
+function getSummary(regions: RegionMeta[], selectedRegionKeys: number[]) {
+  const selectedRegions = regions.filter((region) => selectedRegionKeys.includes(region.key));
+  const totalPoints = selectedRegions.reduce((sum, region) => sum + region.pointCount, 0);
+  const averageW =
+    totalPoints > 0
+      ? selectedRegions.reduce((sum, region) => sum + region.avgW * region.pointCount, 0) / totalPoints
+      : 0;
+
+  return { totalPoints, averageW };
+}
+
 export function Overlay(props: OverlayProps) {
   const {
     selectionRect,
@@ -64,6 +75,8 @@ export function Overlay(props: OverlayProps) {
 
     previousSelectedRegionKeysRef.current = selectedRegionKeys;
   }, [selectedRegionKeys]);
+
+  const summary = getSummary(regions, selectedRegionKeys);
 
   return (
     <>
@@ -149,6 +162,18 @@ export function Overlay(props: OverlayProps) {
           >
             Clear
           </button>
+        </div>
+
+        <div className="card">
+          <h4>Selected regions</h4>
+
+          <div className="display-grid">
+            <span>Total points: </span>
+            <span>{summary.totalPoints}</span>
+
+            <span>Average w: </span>
+            <span>{summary.averageW.toFixed(3)}</span>
+          </div>
         </div>
       </aside>
 

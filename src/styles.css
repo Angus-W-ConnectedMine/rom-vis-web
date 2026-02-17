@@ -225,3 +225,16 @@ body {
   background: var(--success-bg);
   color: var(--success-text);
 }
+
+.card {
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 12px;
+  background: rgba(2, 6, 23, 0.35);
+}
+
+.display-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+}
