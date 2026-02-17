@@ -25,6 +25,9 @@ interface RegionPrism {
   prism: THREE.Group;
 }
 
+const REGION_DEFAULT_COLOR = 0x22d3ee;
+const REGION_SELECTED_COLOR = 0xf59e0b;
+
 function createScene(): THREE.Scene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0f172a);
@@ -420,39 +423,22 @@ export function Visualiser() {
     setStatus("Region selection cancelled.");
   }, []);
 
-  const focusRegionByKey = useCallback((key: number): void => {
-    const camera = cameraRef.current;
-    const controls = controlsRef.current;
-    const regionPrism = regionPrismsRef.current.find((entry) => entry.key === key)?.prism;
-    if (!camera || !controls || !regionPrism) {
-      return;
+  const applyRegionSelectionVisuals = useCallback((selectedKey: number | null): void => {
+    for (const regionPrism of regionPrismsRef.current) {
+      const isSelected = selectedKey !== null && regionPrism.key === selectedKey;
+      regionPrism.prism.traverse((node) => {
+        if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshBasicMaterial) {
+          node.material.color.setHex(isSelected ? REGION_SELECTED_COLOR : REGION_DEFAULT_COLOR);
+          node.material.opacity = isSelected ? 0.3 : 0.12;
+          node.material.needsUpdate = true;
+        }
+        if (node instanceof THREE.LineSegments && node.material instanceof THREE.LineBasicMaterial) {
+          node.material.color.setHex(isSelected ? REGION_SELECTED_COLOR : REGION_DEFAULT_COLOR);
+          node.material.opacity = isSelected ? 1 : 0.95;
+          node.material.needsUpdate = true;
+        }
+      });
     }
-
-    const bounds = new THREE.Box3().setFromObject(regionPrism);
-    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
-    if (!Number.isFinite(sphere.radius) || sphere.radius <= 0) {
-      return;
-    }
-
-    const center = sphere.center;
-    const radius = sphere.radius;
-    controls.target.copy(center);
-
-    const vFov = THREE.MathUtils.degToRad(camera.fov);
-    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-    const distance = Math.max(
-      radius / Math.tan(vFov / 2),
-      radius / Math.tan(hFov / 2),
-    ) * 1.3;
-
-    const direction = camera.position.clone().sub(center);
-    if (direction.lengthSq() === 0) {
-      direction.set(0, 1, 1);
-    }
-    direction.normalize();
-    camera.position.copy(center).add(direction.multiplyScalar(distance));
-    camera.updateProjectionMatrix();
-    controls.update();
   }, []);
 
   const handleSelectRegion = useCallback((key: number): void => {
@@ -460,11 +446,8 @@ export function Visualiser() {
   }, []);
 
   useEffect(() => {
-    if (selectedRegionKey === null) {
-      return;
-    }
-    focusRegionByKey(selectedRegionKey);
-  }, [selectedRegionKey, focusRegionByKey]);
+    applyRegionSelectionVisuals(selectedRegionKey);
+  }, [selectedRegionKey, applyRegionSelectionVisuals, regions.length]);
 
   const handleDeleteRegion = useCallback((key: number): void => {
     const scene = sceneRef.current;
