@@ -47,12 +47,9 @@ function addLights(scene: THREE.Scene): void {
   scene.add(directional);
 }
 
-async function addPointCloud(scene: THREE.Scene): Promise<void> {
-  const response = await fetch("/points");
-  const points = await response.json() as Point[];
-
+function addPointCloud(scene: THREE.Scene, points: Point[]): THREE.Points {
   const positions = new Float32Array(points.length * 3);
-  
+
   for (let i = 0; i < points.length; i += 1) {
     const point = points[i];
 
@@ -74,6 +71,7 @@ async function addPointCloud(scene: THREE.Scene): Promise<void> {
 
   const pointCloud = new THREE.Points(geometry, material);
   scene.add(pointCloud);
+  return pointCloud;
 }
 
 function createControls(
@@ -114,18 +112,71 @@ function startRenderLoop(
   animate();
 }
 
-function main(): void {
+function fitCameraToPointCloud(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  pointCloud: THREE.Points,
+): void {
+  const geometry = pointCloud.geometry;
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+
+  const boundingSphere = geometry.boundingSphere;
+  if (!boundingSphere) {
+    return;
+  }
+
+  const center = boundingSphere.center.clone();
+  const radius = Math.max(boundingSphere.radius, 1);
+
+  controls.target.copy(center);
+
+  const vFov = THREE.MathUtils.degToRad(camera.fov);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const fitHeightDistance = radius / Math.tan(vFov / 2);
+  const fitWidthDistance = radius / Math.tan(hFov / 2);
+  const distance = Math.max(fitHeightDistance, fitWidthDistance) * 1.2;
+
+  const direction = camera.position.clone().sub(controls.target);
+  if (direction.lengthSq() === 0) {
+    direction.set(1, 1, 1);
+  }
+  direction.normalize();
+
+  camera.position.copy(center).add(direction.multiplyScalar(distance));
+  camera.near = Math.max(distance / 1000, 0.1);
+  camera.far = Math.max(distance * 20, 1000);
+  camera.updateProjectionMatrix();
+
+  controls.minDistance = radius * 0.05;
+  controls.maxDistance = radius * 20;
+  controls.update();
+}
+
+async function getPoints(): Promise<Point[]> {
+  const response = await fetch("/points");
+  if (!response.ok) {
+    throw new Error(`Failed to load points: ${response.status}`);
+  }
+  const points = await response.json() as Point[];
+  return points;
+}
+
+async function main(): Promise<void> {
   const root = getRootElement();
   const scene = createScene();
   const camera = createCamera();
   const renderer = createRenderer(root);
+  const controls = createControls(camera, renderer);
+
+  const points = await getPoints();
 
   addLights(scene);
-  addPointCloud(scene);
+  const pointCloud = addPointCloud(scene, points);
+  fitCameraToPointCloud(camera, controls, pointCloud);
 
-  const controls = createControls(camera, renderer);
   bindResize(camera, renderer);
   startRenderLoop(scene, camera, renderer, controls);
 }
 
-main();
+void main();

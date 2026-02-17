@@ -6,14 +6,14 @@ const server = serve({
   port: 8080,
 
   routes: {
-      "/": index,
+    "/": index,
 
-      "/points": {
-        async GET(req) {
-          const points = await getPoints();
-          return Response.json(points);
-        }
+    "/points": {
+      async GET(req) {
+        const points = await getPoints();
+        return Response.json(points);
       }
+    }
   }
 });
 

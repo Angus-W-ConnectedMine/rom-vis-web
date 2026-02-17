@@ -19,9 +19,6 @@ export async function getPoints(): Promise<Point[]> {
     const rows = db.query("SELECT XYZX as x, XYZY as y, XYZZ as z FROM V_PRODUCTION_EVENT WHERE ObjectTypeID = ?").all("DipperReport") as Array<{ x: unknown; y: unknown; z: unknown }>;
 
     const points: Point[] = [];
-    let sumX = 0;
-    let sumY = 0;
-    let sumZ = 0;
 
     for (const row of rows) {
       const x = Number(row.x);
@@ -37,23 +34,6 @@ export async function getPoints(): Promise<Point[]> {
       }
 
       points.push({ x, y, z });
-      sumX += x;
-      sumY += y;
-      sumZ += z;
-    }
-
-    if (points.length === 0) {
-      return points;
-    }
-
-    const avgX = sumX / points.length;
-    const avgY = sumY / points.length;
-    const avgZ = sumZ / points.length;
-
-    for (const point of points) {
-      point.x -= avgX;
-      point.y -= avgY;
-      point.z -= avgZ;
     }
 
     return points;
