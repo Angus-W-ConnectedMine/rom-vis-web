@@ -26,6 +26,7 @@ function createCamera(): THREE.PerspectiveCamera {
     1000,
   );
   camera.position.set(0, 6, 24);
+  camera.up.set(0, 0, 1);
   return camera;
 }
 
@@ -67,7 +68,7 @@ async function addPointCloud(scene: THREE.Scene): Promise<void> {
 
   const material = new THREE.PointsMaterial({
     color: 0x2563eb,
-    size: 0.35,
+    size: 1,
     sizeAttenuation: true,
   });
 

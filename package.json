@@ -2,7 +2,7 @@
   "name": "rom-vis-web",
   "private": true,
   "scripts": {
-    "dev": "bun run src/server.ts"
+    "dev": "bun --hot run src/server.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
