@@ -29,41 +29,28 @@ function getColorStepIndex(value: number, min: number, max: number): number {
   return Math.min(Math.floor(normalized * steps), steps - 1);
 }
 
-export function addPointCloud(scene: THREE.Scene, points: Point[]): THREE.Points {
+export function addPointCloud(
+  scene: THREE.Scene,
+  points: Point[],
+  color: number,
+): THREE.Points {
   const positions = new Float32Array(points.length * 3);
-  const colors = new Float32Array(points.length * 3);
-  const color = new THREE.Color();
-
-  let minW = Infinity;
-  let maxW = -Infinity;
-  for (const point of points) {
-    if (point.w < minW) minW = point.w;
-    if (point.w > maxW) maxW = point.w;
-  }
 
   for (let i = 0; i < points.length; i += 1) {
     const point = points[i];
     if (!point) {
       continue;
     }
-
     positions[i * 3 + 0] = point.x;
     positions[i * 3 + 1] = point.y;
     positions[i * 3 + 2] = point.z;
-
-    const colorIndex = getColorStepIndex(point.w, minW, maxW);
-    color.setHex(POINT_COLOR_STEPS[colorIndex] as number);
-    colors[i * 3 + 0] = color.r;
-    colors[i * 3 + 1] = color.g;
-    colors[i * 3 + 2] = color.b;
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
   const material = new THREE.PointsMaterial({
-    vertexColors: true,
+    color,
     size: 1,
     sizeAttenuation: true,
   });
@@ -71,6 +58,45 @@ export function addPointCloud(scene: THREE.Scene, points: Point[]): THREE.Points
   const pointCloud = new THREE.Points(geometry, material);
   scene.add(pointCloud);
   return pointCloud;
+}
+
+/** Splits points into different colourised point clouds */
+export function addPointClouds(scene: THREE.Scene, allPoints: Point[]): THREE.Group {
+  let minW = Infinity;
+  let maxW = -Infinity;
+  for (const point of allPoints) {
+    if (point.w < minW) minW = point.w;
+    if (point.w > maxW) maxW = point.w;
+  }
+
+  const numBuckets = POINT_COLOR_STEPS.length;
+  const buckets: Point[][] = Array.from({ length: numBuckets }, () => [] as Point[]);
+
+  for (const point of allPoints) {
+    const index = getColorStepIndex(point.w, minW, maxW);
+    const bucket = buckets[index]!;
+    bucket.push(point);
+  }
+
+  const pointClouds = new THREE.Group();
+
+  for (let i = 0; i < numBuckets; i += 1) {
+    const points = buckets[i] as Point[];
+
+    if (points.length === 0) {
+      continue;
+    }
+
+    const color = POINT_COLOR_STEPS[i]!;
+
+    const cloud = addPointCloud(scene, points, color);
+
+    pointClouds.add(cloud);
+  }
+
+  scene.add(pointClouds);
+
+  return pointClouds;
 }
 
 function swap(values: number[], i: number, j: number): void {

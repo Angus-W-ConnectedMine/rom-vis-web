@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
-  addPointCloud,
+  addPointClouds,
   addSelectionPrism,
   fitCameraToPointCloud,
   getPointsInScreenSelection,
@@ -182,7 +182,7 @@ export function Visualiser() {
 
         pointOffsetRef.current = pointOffset;
         pointsRef.current = renderPoints;
-        addPointCloud(scene, renderPoints);
+        addPointClouds(scene, renderPoints);
         fitCameraToPointCloud(camera, controls, renderPoints);
         setStatus(
           "Shift + drag to select. Region details panel is a placeholder for now.",
