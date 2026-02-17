@@ -7,8 +7,8 @@ export interface Point {
   w: number;
 }
 
-const DB_PATH = Bun.env.DB_PATH;
-const USE_MOCK = Bun.env.USE_MOCK === "true" ? true : false;
+const DB_PATH = Bun.env.DB_PATH || "./data/data.db";
+const USE_PROD = Bun.env.USE_PROD === "true" ? true : false;
 
 if (!DB_PATH) {
   throw new Error("Missing DB_PATH environment variable");
@@ -20,9 +20,9 @@ export async function getPoints(): Promise<Point[]> {
   try {
     const points: Point[] = [];
 
-    const query = USE_MOCK ?
-      "SELECT x, y, z, w FROM MockData" :
-      "SELECT XYZX as x, XYZY as y, XYZZ as z, 0 as w FROM V_PRODUCTION_EVENT WHERE ObjectTypeID = 'DipperReport'";
+    const query = USE_PROD ?
+      "SELECT XYZX as x, XYZY as y, XYZZ as z, 0 as w FROM V_PRODUCTION_EVENT WHERE ObjectTypeID = 'DipperReport'" :
+      "SELECT x, y, z, w FROM MockData";
 
     const rows = db.query(query).all() as Array<{ x: unknown; y: unknown; z: unknown; w: unknown }>;
 
