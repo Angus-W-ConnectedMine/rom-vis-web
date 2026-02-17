@@ -69,6 +69,29 @@ function getRegionMinMax(points: Point[]): { min: Point; max: Point } {
   };
 }
 
+function getPointCloudOffset(points: Point[]): Point {
+  if (points.length === 0) {
+    return { x: 0, y: 0, z: 0 };
+  }
+
+  let sumX = 0;
+  let sumY = 0;
+  let sumZ = 0;
+
+  for (const point of points) {
+    sumX += point.x;
+    sumY += point.y;
+    sumZ += point.z;
+  }
+
+  const invCount = 1 / points.length;
+  return {
+    x: sumX * invCount,
+    y: sumY * invCount,
+    z: sumZ * invCount,
+  };
+}
+
 export function Visualiser() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -76,6 +99,7 @@ export function Visualiser() {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const pointsRef = useRef<Point[]>([]);
+  const pointOffsetRef = useRef<Point>({ x: 0, y: 0, z: 0 });
   const regionPrismsRef = useRef<THREE.Group[]>([]);
   const regionIdRef = useRef(1);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
@@ -139,14 +163,22 @@ export function Visualiser() {
 
     void (async () => {
       try {
-        const points = await getPoints();
+        const sourcePoints = await getPoints();
         if (disposed) {
           return;
         }
 
-        pointsRef.current = points;
-        addPointCloud(scene, points);
-        fitCameraToPointCloud(camera, controls, points);
+        const pointOffset = getPointCloudOffset(sourcePoints);
+        const renderPoints = sourcePoints.map((point) => ({
+          x: point.x - pointOffset.x,
+          y: point.y - pointOffset.y,
+          z: point.z - pointOffset.z,
+        }));
+
+        pointOffsetRef.current = pointOffset;
+        pointsRef.current = renderPoints;
+        addPointCloud(scene, renderPoints);
+        fitCameraToPointCloud(camera, controls, renderPoints);
         setStatus(
           "Shift + drag to select. Region details panel is a placeholder for now.",
         );
@@ -179,6 +211,7 @@ export function Visualiser() {
       rendererRef.current = null;
       controlsRef.current = null;
       pointsRef.current = [];
+      pointOffsetRef.current = { x: 0, y: 0, z: 0 };
       setInteractionElement(null);
     };
   }, []);
@@ -225,6 +258,7 @@ export function Visualiser() {
 
     regionPrismsRef.current.push(prism);
     const region = getRegionMinMax(selectedPoints);
+    const pointOffset = pointOffsetRef.current;
     const id = regionIdRef.current;
     regionIdRef.current += 1;
 
@@ -233,8 +267,16 @@ export function Visualiser() {
       {
         id,
         pointCount: selectedPoints.length,
-        min: region.min,
-        max: region.max,
+        min: {
+          x: region.min.x + pointOffset.x,
+          y: region.min.y + pointOffset.y,
+          z: region.min.z + pointOffset.z,
+        },
+        max: {
+          x: region.max.x + pointOffset.x,
+          y: region.max.y + pointOffset.y,
+          z: region.max.z + pointOffset.z,
+        },
       },
     ]);
   }, []);
