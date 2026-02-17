@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
@@ -14,6 +14,7 @@ import {
   type SelectionRect,
 } from "./overlay";
 import type { Point } from "./points";
+import { useSelectionController } from "./useSelectionController";
 
 interface PendingRegionDraft extends PendingRegionSelection {
   min: Point;
@@ -130,24 +131,12 @@ export function Visualiser() {
   const regionKeyRef = useRef(1);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
   const [selectedRegionKeys, setSelectedRegionKeys] = useState<number[]>([]);
-  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [pendingSelection, setPendingSelection] = useState<PendingRegionDraft | null>(null);
   const [status, setStatus] = useState("Loading points...");
   const [interactionElement, setInteractionElement] = useState<HTMLCanvasElement | null>(null);
 
-  const latestRegion = useMemo(() => {
-    if (regions.length === 0) {
-      return null;
-    }
-    return regions[regions.length - 1] as RegionMeta;
-  }, [regions]);
-
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const pendingSelectionRef = useRef<PendingRegionDraft | null>(null);
-
-  useEffect(() => {
-    selectionRectRef.current = selectionRect;
-  }, [selectionRect]);
 
   useEffect(() => {
     pendingSelectionRef.current = pendingSelection;
@@ -378,6 +367,17 @@ export function Visualiser() {
     setStatus("Review region stats and set an ID, or cancel.");
   }, [pendingSelection]);
 
+  const { selectionRect } = useSelectionController({
+    interactionElement,
+    selectionEnabled: !pendingSelection,
+    onSelectionActiveChange: handleSelectionActiveChange,
+    onSelectionComplete: handleSelectionComplete,
+  });
+
+  useEffect(() => {
+    selectionRectRef.current = selectionRect;
+  }, [selectionRect]);
+
   const handleConfirmSelection = useCallback((regionId: string): void => {
     const pendingPrism = pendingPrismRef.current;
     const pending = pendingSelection;
@@ -483,18 +483,12 @@ export function Visualiser() {
     <div className="visualiser-root">
       <div ref={viewportRef} className="visualiser-viewport" />
       <Overlay
-        interactionElement={interactionElement}
         selectionRect={selectionRect}
-        selectionEnabled={!pendingSelection}
-        onSelectionRectChange={setSelectionRect}
-        onSelectionActiveChange={handleSelectionActiveChange}
-        onSelectionComplete={handleSelectionComplete}
         pendingSelection={pendingSelection}
         onConfirmSelection={handleConfirmSelection}
         onCancelSelection={handleCancelSelection}
         status={status}
         regions={regions}
-        latestRegion={latestRegion}
         selectedRegionKeys={selectedRegionKeys}
         onSelectRegion={handleSelectRegion}
         onDeleteRegion={handleDeleteRegion}
