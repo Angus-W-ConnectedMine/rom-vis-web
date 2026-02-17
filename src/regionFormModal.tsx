@@ -27,19 +27,40 @@ export function RegionFormModal(props: RegionFormModalProps) {
   };
 
   return (
-    <div
+    <dialog
+      open
+      onCancel={(event) => {
+        event.preventDefault();
+        onCancelSelection();
+      }}
       style={{
-        position: "absolute",
+        position: "fixed",
         inset: 0,
-        background: "rgba(2, 6, 23, 0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
+        margin: 0,
+        padding: 0,
+        border: "none",
+        background: "transparent",
+        width: "100vw",
+        maxWidth: "100vw",
+        height: "100vh",
+        maxHeight: "100vh",
+        overflow: "hidden",
         zIndex: 20,
       }}
     >
       <div
+        style={{
+          width: "100%",
+          height: "100%",
+          background: "rgba(2, 6, 23, 0.55)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 16,
+          boxSizing: "border-box",
+        }}
+      >
+        <div
         style={{
           width: "min(480px, 100%)",
           borderRadius: 10,
@@ -113,7 +134,8 @@ export function RegionFormModal(props: RegionFormModalProps) {
             Save Region
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </dialog>
   );
 }
