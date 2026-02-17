@@ -197,24 +197,9 @@ export function Overlay(props: OverlayProps) {
       <aside className="overlay-panel">
         <div className="overlay-title">Regions</div>
         <div className="overlay-status">{status}</div>
-        <div className="overlay-count">
-          Regions selected: <strong>{regions.length}</strong>
-        </div>
 
-        <div className="overlay-toolbar">
-          <button
-            className="btn"
-            type="button"
-            onClick={onClearRegions}
-            disabled={regions.length === 0}
-          >
-            Clear All
-          </button>
-        </div>
-
-        <div className="overlay-subtitle">Saved regions</div>
         {regions.length === 0 ? (
-          <div className="overlay-empty">No saved regions yet.</div>
+          <div className="overlay-empty">No regions</div>
         ) : (
           <div className="overlay-region-list">
             {regions.map((region) => (
@@ -252,22 +237,16 @@ export function Overlay(props: OverlayProps) {
           </div>
         )}
 
-        <div className="overlay-subtitle">Latest region</div>
-        <pre className="overlay-json">
-          {latestRegion
-            ? JSON.stringify(
-                {
-                  regionId: latestRegion.regionId,
-                  pointCount: latestRegion.pointCount,
-                  minW: latestRegion.minW,
-                  maxW: latestRegion.maxW,
-                  avgW: latestRegion.avgW,
-                },
-                null,
-                2,
-              )
-            : "No selections yet"}
-        </pre>
+        <div className="overlay-toolbar">
+          <button
+            className="btn"
+            type="button"
+            onClick={onClearRegions}
+            disabled={regions.length === 0}
+          >
+            Clear All
+          </button>
+        </div>
       </aside>
       {pendingSelection ? (
         <RegionFormModal

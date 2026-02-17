@@ -264,7 +264,7 @@ export function Visualiser() {
         addPointClouds(scene, renderPoints);
         fitCameraToPointCloud(camera, controls, renderPoints);
         setStatus(
-          "Shift + drag to select. Region details panel is a placeholder for now.",
+          "Shift + drag to select",
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
