@@ -121,6 +121,7 @@ export function Overlay(props: OverlayProps) {
           </button>
         </div>
       </aside>
+
       {pendingSelection ? (
         <RegionFormModal
           pendingSelection={pendingSelection}

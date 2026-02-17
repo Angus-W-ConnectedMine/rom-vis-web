@@ -9,20 +9,20 @@ interface RegionFormModalProps {
 
 export function RegionFormModal(props: RegionFormModalProps) {
   const { pendingSelection, onConfirmSelection, onCancelSelection } = props;
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const selectionIDInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.value = pendingSelection.suggestedId;
-      inputRef.current.focus();
-      inputRef.current.select();
+    if (selectionIDInputRef.current) {
+      selectionIDInputRef.current.value = pendingSelection.suggestedId;
+      selectionIDInputRef.current.focus();
+      selectionIDInputRef.current.select();
     }
   }, [pendingSelection]);
 
-  const submitPendingSelection = (): void => {
-    const value = inputRef.current?.value?.trim() ?? "";
+  const onFormConfirmed = (): void => {
+    const selectionID = selectionIDInputRef.current?.value?.trim() ?? "";
     onConfirmSelection(
-      value.length > 0 ? value : pendingSelection.suggestedId,
+      selectionID.length > 0 ? selectionID : pendingSelection.suggestedId,
     );
   };
 
@@ -37,46 +37,46 @@ export function RegionFormModal(props: RegionFormModalProps) {
     >
       <div className="modal-scrim">
         <div className="modal-card">
-        <div className="modal-title">Save Region</div>
-        <div className="modal-stats">
-          <div>Points: <strong>{pendingSelection.pointCount}</strong></div>
-          <div>
-            W min/max: <strong>{pendingSelection.minW.toFixed(3)}</strong> /{" "}
-            <strong>{pendingSelection.maxW.toFixed(3)}</strong>
+          <div className="modal-title">Save Region</div>
+          <div className="modal-stats">
+            <div>Points: <strong>{pendingSelection.pointCount}</strong></div>
+            <div>
+              W min/max: <strong>{pendingSelection.minW.toFixed(3)}</strong> /{" "}
+              <strong>{pendingSelection.maxW.toFixed(3)}</strong>
+            </div>
+            <div>W avg: <strong>{pendingSelection.avgW.toFixed(3)}</strong></div>
           </div>
-          <div>W avg: <strong>{pendingSelection.avgW.toFixed(3)}</strong></div>
-        </div>
-        <label className="label">
-          Region ID
-        </label>
-        <input
-          className="input"
-          ref={inputRef}
-          type="text"
-          defaultValue={pendingSelection.suggestedId}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              submitPendingSelection();
-            }
-          }}
-        />
-        <div className="actions">
-          <button
-            className="btn"
-            type="button"
-            onClick={onCancelSelection}
-          >
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={submitPendingSelection}
-          >
-            Save Region
-          </button>
-        </div>
+          <label className="label">
+            Region ID
+          </label>
+          <input
+            className="input"
+            ref={selectionIDInputRef}
+            type="text"
+            defaultValue={pendingSelection.suggestedId}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onFormConfirmed();
+              }
+            }}
+          />
+          <div className="actions">
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={onFormConfirmed}
+            >
+              Ok
+            </button>
+            <button
+              className="btn"
+              type="button"
+              onClick={onCancelSelection}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </dialog>
