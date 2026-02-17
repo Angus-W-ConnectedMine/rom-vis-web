@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
@@ -71,10 +71,17 @@ function getRegionMinMax(points: Point[]): { min: Point; max: Point } {
 
 export function Visualiser() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const pointsRef = useRef<Point[]>([]);
+  const regionPrismsRef = useRef<THREE.Group[]>([]);
   const regionIdRef = useRef(1);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [status, setStatus] = useState("Loading points...");
+  const [interactionElement, setInteractionElement] = useState<HTMLCanvasElement | null>(null);
 
   const latestRegion = useMemo(() => {
     if (regions.length === 0) {
@@ -101,7 +108,12 @@ export function Visualiser() {
     controls.update();
     addLights(scene);
 
-    const regionPrisms: THREE.Group[] = [];
+    sceneRef.current = scene;
+    cameraRef.current = camera;
+    rendererRef.current = renderer;
+    controlsRef.current = controls;
+    setInteractionElement(renderer.domElement);
+    regionPrismsRef.current = [];
 
     const resize = (): void => {
       if (disposed) {
@@ -123,143 +135,16 @@ export function Visualiser() {
       frameId = requestAnimationFrame(animate);
     };
 
-    let points: Point[] = [];
-    let isSelecting = false;
-    let pointerId = -1;
-    let startX = 0;
-    let startY = 0;
-    let currentX = 0;
-    let currentY = 0;
-
-    const updateSelectionRect = (): void => {
-      const minX = Math.min(startX, currentX);
-      const minY = Math.min(startY, currentY);
-      const maxX = Math.max(startX, currentX);
-      const maxY = Math.max(startY, currentY);
-      setSelectionRect({
-        left: minX,
-        top: minY,
-        width: maxX - minX,
-        height: maxY - minY,
-      });
-    };
-
-    const getCanvasPosition = (event: PointerEvent): { x: number; y: number } => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      return {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const finishSelection = (event: PointerEvent): void => {
-      if (!isSelecting || event.pointerId !== pointerId) {
-        return;
-      }
-
-      isSelecting = false;
-      controls.enabled = true;
-      setSelectionRect(null);
-
-      if (renderer.domElement.hasPointerCapture(pointerId)) {
-        renderer.domElement.releasePointerCapture(pointerId);
-      }
-
-      const minX = Math.min(startX, currentX);
-      const maxX = Math.max(startX, currentX);
-      const minY = Math.min(startY, currentY);
-      const maxY = Math.max(startY, currentY);
-
-      if (maxX - minX < 2 || maxY - minY < 2 || points.length === 0) {
-        return;
-      }
-
-      const selectedPoints = getPointsInScreenSelection(
-        points,
-        camera,
-        renderer.domElement.clientWidth,
-        renderer.domElement.clientHeight,
-        { minX, maxX, minY, maxY },
-      );
-
-      if (selectedPoints.length === 0) {
-        return;
-      }
-
-      const prism = addSelectionPrism(scene, selectedPoints, 20);
-      if (!prism) {
-        return;
-      }
-
-      regionPrisms.push(prism);
-      const region = getRegionMinMax(selectedPoints);
-      const id = regionIdRef.current;
-      regionIdRef.current += 1;
-
-      setRegions((prev) => [
-        ...prev,
-        {
-          id,
-          pointCount: selectedPoints.length,
-          min: region.min,
-          max: region.max,
-        },
-      ]);
-    };
-
-    const onPointerDown = (event: PointerEvent): void => {
-      if (!event.shiftKey || event.button !== 0) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      const position = getCanvasPosition(event);
-
-      isSelecting = true;
-      pointerId = event.pointerId;
-      startX = position.x;
-      startY = position.y;
-      currentX = position.x;
-      currentY = position.y;
-      controls.enabled = false;
-      updateSelectionRect();
-      renderer.domElement.setPointerCapture(pointerId);
-    };
-
-    const onPointerMove = (event: PointerEvent): void => {
-      if (!isSelecting || event.pointerId !== pointerId) {
-        return;
-      }
-      const position = getCanvasPosition(event);
-      currentX = position.x;
-      currentY = position.y;
-      updateSelectionRect();
-    };
-
-    const onPointerUp = (event: PointerEvent): void => {
-      finishSelection(event);
-    };
-
-    const onPointerCancel = (event: PointerEvent): void => {
-      finishSelection(event);
-    };
-
     window.addEventListener("resize", resize);
-    renderer.domElement.addEventListener("pointerdown", onPointerDown, {
-      capture: true,
-    });
-    renderer.domElement.addEventListener("pointermove", onPointerMove);
-    renderer.domElement.addEventListener("pointerup", onPointerUp);
-    renderer.domElement.addEventListener("pointercancel", onPointerCancel);
 
     void (async () => {
       try {
-        points = await getPoints();
+        const points = await getPoints();
         if (disposed) {
           return;
         }
 
+        pointsRef.current = points;
         addPointCloud(scene, points);
         fitCameraToPointCloud(camera, controls, points);
         setStatus(
@@ -280,20 +165,78 @@ export function Visualiser() {
       cancelAnimationFrame(frameId);
 
       window.removeEventListener("resize", resize);
-      renderer.domElement.removeEventListener("pointerdown", onPointerDown, {
-        capture: true,
-      });
-      renderer.domElement.removeEventListener("pointermove", onPointerMove);
-      renderer.domElement.removeEventListener("pointerup", onPointerUp);
-      renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
 
-      for (const prism of regionPrisms) {
+      for (const prism of regionPrismsRef.current) {
         scene.remove(prism);
       }
+      regionPrismsRef.current = [];
       controls.dispose();
       renderer.dispose();
       renderer.domElement.remove();
+
+      sceneRef.current = null;
+      cameraRef.current = null;
+      rendererRef.current = null;
+      controlsRef.current = null;
+      pointsRef.current = [];
+      setInteractionElement(null);
     };
+  }, []);
+
+  const handleSelectionActiveChange = useCallback((active: boolean): void => {
+    const controls = controlsRef.current;
+    if (!controls) {
+      return;
+    }
+    controls.enabled = !active;
+  }, []);
+
+  const handleSelectionComplete = useCallback((rect: SelectionRect): void => {
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    const points = pointsRef.current;
+
+    if (!scene || !camera || !renderer || points.length === 0) {
+      return;
+    }
+
+    const selectedPoints = getPointsInScreenSelection(
+      points,
+      camera,
+      renderer.domElement.clientWidth,
+      renderer.domElement.clientHeight,
+      {
+        minX: rect.left,
+        maxX: rect.left + rect.width,
+        minY: rect.top,
+        maxY: rect.top + rect.height,
+      },
+    );
+
+    if (selectedPoints.length === 0) {
+      return;
+    }
+
+    const prism = addSelectionPrism(scene, selectedPoints, 20);
+    if (!prism) {
+      return;
+    }
+
+    regionPrismsRef.current.push(prism);
+    const region = getRegionMinMax(selectedPoints);
+    const id = regionIdRef.current;
+    regionIdRef.current += 1;
+
+    setRegions((prev) => [
+      ...prev,
+      {
+        id,
+        pointCount: selectedPoints.length,
+        min: region.min,
+        max: region.max,
+      },
+    ]);
   }, []);
 
   return (
@@ -307,7 +250,11 @@ export function Visualiser() {
     >
       <div ref={viewportRef} style={{ width: "100%", height: "100%" }} />
       <Overlay
+        interactionElement={interactionElement}
         selectionRect={selectionRect}
+        onSelectionRectChange={setSelectionRect}
+        onSelectionActiveChange={handleSelectionActiveChange}
+        onSelectionComplete={handleSelectionComplete}
         status={status}
         regions={regions}
         latestRegion={latestRegion}

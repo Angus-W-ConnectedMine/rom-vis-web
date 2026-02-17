@@ -6,6 +6,10 @@ export interface Point {
   z: number;
 }
 
+export interface ValuePoint extends Point {
+  w: number;
+};
+
 const DB_PATH = Bun.env.DB_PATH;
 
 if (!DB_PATH) {
