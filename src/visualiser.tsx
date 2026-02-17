@@ -3,9 +3,15 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   addPointClouds,
+  fromStoredPrism,
+  getPointsInPrism,
+  getPrismSnapshot,
+  restorePrism,
   addSelectionPrism,
   fitCameraToPointCloud,
   getPointsInScreenSelection,
+  toStoredPrism,
+  type PrismSnapshot,
 } from "./geometry";
 import {
   Overlay,
@@ -13,11 +19,14 @@ import {
   type SelectionRect,
 } from "./overlay";
 import type { Point } from "./points";
+import { loadStoredPrisms, saveStoredPrisms } from "./storage";
 import { useSelectionController } from "./useSelectionController";
 
 interface RegionPrism {
   key: number;
+  regionId: string;
   prism: THREE.Group;
+  snapshot: PrismSnapshot;
 }
 
 const REGION_DEFAULT_COLOR = 0x22d3ee;
@@ -112,6 +121,61 @@ function getPointCloudOffset(points: Point[]): { x: number; y: number; z: number
   };
 }
 
+function getRegionMetaFromSelection(
+  key: number,
+  regionId: string,
+  snapshot: PrismSnapshot,
+  selectedPoints: Point[],
+  pointOffset: { x: number; y: number; z: number },
+): RegionMeta {
+  if (selectedPoints.length > 0) {
+    const region = getRegionStats(selectedPoints);
+    return {
+      key,
+      regionId,
+      pointCount: selectedPoints.length,
+      minW: region.min.w,
+      maxW: region.max.w,
+      avgW: region.avgW,
+      min: {
+        x: region.min.x + pointOffset.x,
+        y: region.min.y + pointOffset.y,
+        z: region.min.z + pointOffset.z,
+        w: region.min.w,
+      },
+      max: {
+        x: region.max.x + pointOffset.x,
+        y: region.max.y + pointOffset.y,
+        z: region.max.z + pointOffset.z,
+        w: region.max.w,
+      },
+    };
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const point of snapshot.footprint) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+
+  return {
+    key,
+    regionId,
+    pointCount: 0,
+    minW: 0,
+    maxW: 0,
+    avgW: 0,
+    min: { x: minX + pointOffset.x, y: minY + pointOffset.y, z: snapshot.minZ + pointOffset.z, w: 0 },
+    max: { x: maxX + pointOffset.x, y: maxY + pointOffset.y, z: snapshot.maxZ + pointOffset.z, w: 0 },
+  };
+}
+
 export function Visualiser() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -134,6 +198,14 @@ export function Visualiser() {
   useEffect(() => {
     editingRegionKeyRef.current = editingRegionKey;
   }, [editingRegionKey]);
+
+  const persistRegionPrisms = useCallback((): void => {
+    saveStoredPrisms(
+      regionPrismsRef.current.map((regionPrism) =>
+        toStoredPrism(regionPrism.key, regionPrism.regionId, regionPrism.snapshot)
+      ),
+    );
+  }, []);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -246,6 +318,39 @@ export function Visualiser() {
         pointOffsetRef.current = pointOffset;
         pointsRef.current = renderPoints;
         addPointClouds(scene, renderPoints);
+
+        const storedPrisms = loadStoredPrisms();
+        if (storedPrisms.length > 0) {
+          let maxRegionKey = 0;
+          const restoredRegionPrisms: RegionPrism[] = [];
+          const restoredRegions: RegionMeta[] = [];
+
+          for (const storedPrism of storedPrisms) {
+            const snapshot = fromStoredPrism(storedPrism);
+            const prism = restorePrism(scene, snapshot);
+            if (!prism) {
+              continue;
+            }
+
+            const key = storedPrism.key;
+            const regionId = storedPrism.regionId;
+            const selectedPoints = getPointsInPrism(renderPoints, snapshot);
+            maxRegionKey = Math.max(maxRegionKey, key);
+            prism.userData.regionKey = key;
+            prism.traverse((node) => {
+              node.userData.regionKey = key;
+            });
+            restoredRegionPrisms.push({ key, regionId, prism, snapshot });
+            restoredRegions.push(
+              getRegionMetaFromSelection(key, regionId, snapshot, selectedPoints, pointOffset),
+            );
+          }
+
+          regionPrismsRef.current = restoredRegionPrisms;
+          setRegions(restoredRegions);
+          regionKeyRef.current = maxRegionKey + 1;
+        }
+
         fitCameraToPointCloud(camera, controls, renderPoints);
         setStatus(
           "Shift + drag to select",
@@ -334,7 +439,12 @@ export function Visualiser() {
       return;
     }
 
-    const region = getRegionStats(selectedPoints);
+    const prismSnapshot = getPrismSnapshot(prism);
+    if (!prismSnapshot) {
+      scene.remove(prism);
+      return;
+    }
+
     const pointOffset = pointOffsetRef.current;
     const suggestedId = `region-${regionKeyRef.current}`;
     const key = regionKeyRef.current;
@@ -344,33 +454,15 @@ export function Visualiser() {
     prism.traverse((node) => {
       node.userData.regionKey = key;
     });
-    regionPrismsRef.current.push({ key, prism });
+    regionPrismsRef.current.push({ key, regionId: suggestedId, prism, snapshot: prismSnapshot });
+    persistRegionPrisms();
 
     setRegions((prev) => [
       ...prev,
-      {
-        key,
-        regionId: suggestedId,
-        pointCount: selectedPoints.length,
-        minW: region.min.w,
-        maxW: region.max.w,
-        avgW: region.avgW,
-        min: {
-          x: region.min.x + pointOffset.x,
-          y: region.min.y + pointOffset.y,
-          z: region.min.z + pointOffset.z,
-          w: region.min.w,
-        },
-        max: {
-          x: region.max.x + pointOffset.x,
-          y: region.max.y + pointOffset.y,
-          z: region.max.z + pointOffset.z,
-          w: region.max.w,
-        },
-      },
+      getRegionMetaFromSelection(key, suggestedId, prismSnapshot, selectedPoints, pointOffset),
     ]);
     setStatus("Region added. Use Edit to rename.");
-  }, [editingRegionKey]);
+  }, [editingRegionKey, persistRegionPrisms]);
 
   const { selectionRect } = useSelectionController({
     interactionElement,
@@ -388,6 +480,13 @@ export function Visualiser() {
   }, []);
 
   const handleSaveRegionEdit = useCallback((key: number, regionId: string): void => {
+    for (const regionPrism of regionPrismsRef.current) {
+      if (regionPrism.key === key) {
+        regionPrism.regionId = regionId;
+        break;
+      }
+    }
+    persistRegionPrisms();
     setRegions((prev) =>
       prev.map((region) =>
         region.key === key
@@ -400,7 +499,7 @@ export function Visualiser() {
     );
     setEditingRegionKey(null);
     setStatus("Region updated.");
-  }, []);
+  }, [persistRegionPrisms]);
 
   const handleCancelRegionEdit = useCallback((): void => {
     setEditingRegionKey(null);
@@ -451,10 +550,11 @@ export function Visualiser() {
       }
     }
     regionPrismsRef.current = nextRegionPrisms;
+    persistRegionPrisms();
     setRegions((prev) => prev.filter((region) => region.key !== key));
     setSelectedRegionKeys((prev) => prev.filter((value) => value !== key));
     setEditingRegionKey((prev) => (prev === key ? null : prev));
-  }, []);
+  }, [persistRegionPrisms]);
 
   const handleClearSelections = useCallback((): void => {
     setSelectedRegionKeys([]);

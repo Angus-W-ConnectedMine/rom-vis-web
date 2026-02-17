@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Point } from "./points";
+import type { StoredPrism } from "./storage";
 
 export interface ScreenSelectionRect {
   minX: number;
@@ -8,6 +9,14 @@ export interface ScreenSelectionRect {
   minY: number;
   maxY: number;
 }
+
+export interface PrismSnapshot {
+  minZ: number;
+  maxZ: number;
+  footprint: Array<{ x: number; y: number }>;
+}
+
+const POLYGON_EPSILON = 1e-9;
 
 // Keep this as a constant so we can wire to UI/config later.
 export const POINT_COLOR_STEPS = [
@@ -243,6 +252,72 @@ export function getPointsInScreenSelection(
   return selected;
 }
 
+function isPointOnSegment2D(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): boolean {
+  const cross = (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+  if (Math.abs(cross) > POLYGON_EPSILON) {
+    return false;
+  }
+
+  const dot = (px - ax) * (bx - ax) + (py - ay) * (by - ay);
+  if (dot < -POLYGON_EPSILON) {
+    return false;
+  }
+
+  const lengthSquared = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+  return dot <= lengthSquared + POLYGON_EPSILON;
+}
+
+function isPointInPolygon2D(x: number, y: number, polygon: Array<{ x: number; y: number }>): boolean {
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const current = polygon[i] as { x: number; y: number };
+    const previous = polygon[j] as { x: number; y: number };
+
+    if (isPointOnSegment2D(x, y, current.x, current.y, previous.x, previous.y)) {
+      return true;
+    }
+
+    const intersects = ((current.y > y) !== (previous.y > y)) &&
+      (x < (previous.x - current.x) * (y - current.y) / (previous.y - current.y) + current.x);
+
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+export function getPointsInPrism(points: Point[], snapshot: PrismSnapshot): Point[] {
+  if (snapshot.footprint.length < 3) {
+    return [];
+  }
+
+  const minZ = Math.min(snapshot.minZ, snapshot.maxZ);
+  const maxZ = Math.max(snapshot.minZ, snapshot.maxZ);
+  const selected: Point[] = [];
+
+  for (const point of points) {
+    if (point.z < minZ || point.z > maxZ) {
+      continue;
+    }
+
+    if (isPointInPolygon2D(point.x, point.y, snapshot.footprint)) {
+      selected.push(point);
+    }
+  }
+
+  return selected;
+}
+
 function cross2D(o: THREE.Vector2, a: THREE.Vector2, b: THREE.Vector2): number {
   return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
 }
@@ -383,23 +458,20 @@ function getPrismFootprint(points: Point[], maxVertices: number): THREE.Vector2[
   return getRectangularFootprint(points);
 }
 
-export function addSelectionPrism(
+function addPrismFromSnapshot(
   scene: THREE.Scene,
-  selectedPoints: Point[],
-  maxVertices = 20,
+  snapshot: PrismSnapshot,
 ): THREE.Group | null {
-  if (selectedPoints.length === 0) {
+  const { minZ, maxZ } = snapshot;
+
+  if (!Number.isFinite(minZ) || !Number.isFinite(maxZ)) {
     return null;
   }
 
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const point of selectedPoints) {
-    if (point.z < minZ) minZ = point.z;
-    if (point.z > maxZ) maxZ = point.z;
-  }
+  const footprint = snapshot.footprint
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map((point) => new THREE.Vector2(point.x, point.y));
 
-  const footprint = getPrismFootprint(selectedPoints, maxVertices);
   if (footprint.length < 3) {
     return null;
   }
@@ -434,6 +506,74 @@ export function addSelectionPrism(
   prism.add(prismMesh);
   prism.add(edges);
   prism.position.z = minZ;
+  prism.userData.prismSnapshot = snapshot;
   scene.add(prism);
+
   return prism;
+}
+
+export function toStoredPrism(key: number, regionId: string, snapshot: PrismSnapshot): StoredPrism {
+  return {
+    key,
+    regionId,
+    minZ: snapshot.minZ,
+    maxZ: snapshot.maxZ,
+    footprint: snapshot.footprint.map((point) => ({ x: point.x, y: point.y })),
+  };
+}
+
+export function fromStoredPrism(storedPrism: StoredPrism): PrismSnapshot {
+  return {
+    minZ: storedPrism.minZ,
+    maxZ: storedPrism.maxZ,
+    footprint: storedPrism.footprint.map((point) => ({ x: point.x, y: point.y })),
+  };
+}
+
+export function restorePrism(
+  scene: THREE.Scene,
+  snapshot: PrismSnapshot,
+): THREE.Group | null {
+  return addPrismFromSnapshot(scene, snapshot);
+}
+
+export function getPrismSnapshot(prism: THREE.Group): PrismSnapshot | null {
+  const snapshot = prism.userData.prismSnapshot as PrismSnapshot | undefined;
+  if (!snapshot) {
+    return null;
+  }
+
+  return {
+    minZ: snapshot.minZ,
+    maxZ: snapshot.maxZ,
+    footprint: snapshot.footprint.map((point) => ({ x: point.x, y: point.y })),
+  };
+}
+
+export function addSelectionPrism(
+  scene: THREE.Scene,
+  selectedPoints: Point[],
+  maxVertices = 20,
+): THREE.Group | null {
+  if (selectedPoints.length === 0) {
+    return null;
+  }
+
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const point of selectedPoints) {
+    if (point.z < minZ) minZ = point.z;
+    if (point.z > maxZ) maxZ = point.z;
+  }
+
+  const footprint = getPrismFootprint(selectedPoints, maxVertices);
+  if (footprint.length < 3) {
+    return null;
+  }
+
+  return addPrismFromSnapshot(scene, {
+    minZ,
+    maxZ,
+    footprint: footprint.map((point) => ({ x: point.x, y: point.y })),
+  });
 }
