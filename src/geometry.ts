@@ -133,11 +133,8 @@ export function fitCameraToPointCloud(
   const fitWidthDistance = radius / Math.tan(hFov / 2);
   const distance = Math.max(fitHeightDistance, fitWidthDistance) * 1.2;
 
-  const direction = camera.position.clone().sub(controls.target);
-  if (direction.lengthSq() === 0) {
-    direction.set(1, 1, 1);
-  }
-  direction.normalize();
+  // 45-degrees
+  const direction = new THREE.Vector3(0, 1, 1).normalize();
 
   camera.position.copy(center).add(direction.multiplyScalar(distance));
   camera.near = Math.max(distance / 1000, 0.1);
