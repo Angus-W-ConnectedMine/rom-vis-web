@@ -41,6 +41,10 @@ interface OverlayProps {
   status: string;
   regions: RegionMeta[];
   latestRegion: RegionMeta | null;
+  selectedRegionKey: number | null;
+  onSelectRegion: (key: number) => void;
+  onDeleteRegion: (key: number) => void;
+  onClearRegions: () => void;
 }
 
 export function Overlay(props: OverlayProps) {
@@ -57,6 +61,10 @@ export function Overlay(props: OverlayProps) {
     status,
     regions,
     latestRegion,
+    selectedRegionKey,
+    onSelectRegion,
+    onDeleteRegion,
+    onClearRegions,
   } = props;
   const pointerIdRef = useRef<number | null>(null);
   const selectionRectRef = useRef<SelectionRect | null>(null);
@@ -187,28 +195,77 @@ export function Overlay(props: OverlayProps) {
         />
       ) : null}
       <aside className="overlay-panel">
-        <div className="overlay-title">Overlay Placeholder</div>
+        <div className="overlay-title">Regions</div>
         <div className="overlay-status">{status}</div>
         <div className="overlay-count">
           Regions selected: <strong>{regions.length}</strong>
         </div>
-        <div className="overlay-subtitle">Latest region (placeholder)</div>
+
+        <div className="overlay-toolbar">
+          <button
+            className="btn"
+            type="button"
+            onClick={onClearRegions}
+            disabled={regions.length === 0}
+          >
+            Clear All
+          </button>
+        </div>
+
+        <div className="overlay-subtitle">Saved regions</div>
+        {regions.length === 0 ? (
+          <div className="overlay-empty">No saved regions yet.</div>
+        ) : (
+          <div className="overlay-region-list">
+            {regions.map((region) => (
+              <div
+                key={region.key}
+                className={`overlay-region-item${selectedRegionKey === region.key ? " is-selected" : ""}`}
+                onClick={() => onSelectRegion(region.key)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectRegion(region.key);
+                  }
+                }}
+              >
+                <div className="overlay-region-row">
+                  <strong>{region.regionId}</strong>
+                  <button
+                    className="btn overlay-btn-delete"
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDeleteRegion(region.key);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+                <div className="overlay-region-meta">
+                  points: {region.pointCount} | W min/max/avg: {region.minW.toFixed(3)} / {region.maxW.toFixed(3)} / {region.avgW.toFixed(3)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="overlay-subtitle">Latest region</div>
         <pre className="overlay-json">
           {latestRegion
             ? JSON.stringify(
-              {
-                key: latestRegion.key,
-                regionId: latestRegion.regionId,
-                pointCount: latestRegion.pointCount,
-                minW: latestRegion.minW,
-                maxW: latestRegion.maxW,
-                avgW: latestRegion.avgW,
-                min: latestRegion.min,
-                max: latestRegion.max,
-              },
-              null,
-              2,
-            )
+                {
+                  regionId: latestRegion.regionId,
+                  pointCount: latestRegion.pointCount,
+                  minW: latestRegion.minW,
+                  maxW: latestRegion.maxW,
+                  avgW: latestRegion.avgW,
+                },
+                null,
+                2,
+              )
             : "No selections yet"}
         </pre>
       </aside>

@@ -20,6 +20,11 @@ interface PendingRegionDraft extends PendingRegionSelection {
   max: Point;
 }
 
+interface RegionPrism {
+  key: number;
+  prism: THREE.Group;
+}
+
 function createScene(): THREE.Scene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0f172a);
@@ -117,10 +122,11 @@ export function Visualiser() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const pointsRef = useRef<Point[]>([]);
   const pointOffsetRef = useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
-  const regionPrismsRef = useRef<THREE.Group[]>([]);
+  const regionPrismsRef = useRef<RegionPrism[]>([]);
   const pendingPrismRef = useRef<THREE.Group | null>(null);
   const regionKeyRef = useRef(1);
   const [regions, setRegions] = useState<RegionMeta[]>([]);
+  const [selectedRegionKey, setSelectedRegionKey] = useState<number | null>(null);
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [pendingSelection, setPendingSelection] = useState<PendingRegionDraft | null>(null);
   const [status, setStatus] = useState("Loading points...");
@@ -132,6 +138,17 @@ export function Visualiser() {
     }
     return regions[regions.length - 1] as RegionMeta;
   }, [regions]);
+
+  const selectionRectRef = useRef<SelectionRect | null>(null);
+  const pendingSelectionRef = useRef<PendingRegionDraft | null>(null);
+
+  useEffect(() => {
+    selectionRectRef.current = selectionRect;
+  }, [selectionRect]);
+
+  useEffect(() => {
+    pendingSelectionRef.current = pendingSelection;
+  }, [pendingSelection]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -178,7 +195,51 @@ export function Visualiser() {
       frameId = requestAnimationFrame(animate);
     };
 
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+
+    const findRegionKeyFromObject = (object: THREE.Object3D): number | null => {
+      let current: THREE.Object3D | null = object;
+      while (current) {
+        const key = current.userData.regionKey;
+        if (typeof key === "number") {
+          return key;
+        }
+        current = current.parent;
+      }
+      return null;
+    };
+
+    const onSceneClick = (event: MouseEvent): void => {
+      if (pendingSelectionRef.current || selectionRectRef.current) {
+        return;
+      }
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        return;
+      }
+
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+
+      const regionObjects = regionPrismsRef.current.map((regionPrism) => regionPrism.prism);
+      const intersections = raycaster.intersectObjects(regionObjects, true);
+      if (intersections.length === 0) {
+        return;
+      }
+
+      const key = findRegionKeyFromObject(intersections[0]!.object);
+      if (key === null) {
+        return;
+      }
+
+      setSelectedRegionKey(key);
+    };
+
     window.addEventListener("resize", resize);
+    renderer.domElement.addEventListener("click", onSceneClick);
 
     void (async () => {
       try {
@@ -217,9 +278,10 @@ export function Visualiser() {
       cancelAnimationFrame(frameId);
 
       window.removeEventListener("resize", resize);
+      renderer.domElement.removeEventListener("click", onSceneClick);
 
-      for (const prism of regionPrismsRef.current) {
-        scene.remove(prism);
+      for (const regionPrism of regionPrismsRef.current) {
+        scene.remove(regionPrism.prism);
       }
       regionPrismsRef.current = [];
       controls.dispose();
@@ -234,6 +296,7 @@ export function Visualiser() {
       pointOffsetRef.current = { x: 0, y: 0, z: 0 };
       pendingPrismRef.current = null;
       setPendingSelection(null);
+      setSelectedRegionKey(null);
       setInteractionElement(null);
     };
   }, []);
@@ -318,11 +381,14 @@ export function Visualiser() {
       return;
     }
 
-    regionPrismsRef.current.push(pendingPrism);
-    pendingPrismRef.current = null;
-
     const key = regionKeyRef.current;
     regionKeyRef.current += 1;
+    pendingPrism.userData.regionKey = key;
+    pendingPrism.traverse((node) => {
+      node.userData.regionKey = key;
+    });
+    regionPrismsRef.current.push({ key, prism: pendingPrism });
+    pendingPrismRef.current = null;
 
     setRegions((prev) => [
       ...prev,
@@ -337,6 +403,7 @@ export function Visualiser() {
         max: pending.max,
       },
     ]);
+    setSelectedRegionKey(key);
     setPendingSelection(null);
     setStatus("Region saved.");
   }, [pendingSelection]);
@@ -351,6 +418,85 @@ export function Visualiser() {
     pendingPrismRef.current = null;
     setPendingSelection(null);
     setStatus("Region selection cancelled.");
+  }, []);
+
+  const focusRegionByKey = useCallback((key: number): void => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const regionPrism = regionPrismsRef.current.find((entry) => entry.key === key)?.prism;
+    if (!camera || !controls || !regionPrism) {
+      return;
+    }
+
+    const bounds = new THREE.Box3().setFromObject(regionPrism);
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    if (!Number.isFinite(sphere.radius) || sphere.radius <= 0) {
+      return;
+    }
+
+    const center = sphere.center;
+    const radius = sphere.radius;
+    controls.target.copy(center);
+
+    const vFov = THREE.MathUtils.degToRad(camera.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const distance = Math.max(
+      radius / Math.tan(vFov / 2),
+      radius / Math.tan(hFov / 2),
+    ) * 1.3;
+
+    const direction = camera.position.clone().sub(center);
+    if (direction.lengthSq() === 0) {
+      direction.set(0, 1, 1);
+    }
+    direction.normalize();
+    camera.position.copy(center).add(direction.multiplyScalar(distance));
+    camera.updateProjectionMatrix();
+    controls.update();
+  }, []);
+
+  const handleSelectRegion = useCallback((key: number): void => {
+    setSelectedRegionKey(key);
+  }, []);
+
+  useEffect(() => {
+    if (selectedRegionKey === null) {
+      return;
+    }
+    focusRegionByKey(selectedRegionKey);
+  }, [selectedRegionKey, focusRegionByKey]);
+
+  const handleDeleteRegion = useCallback((key: number): void => {
+    const scene = sceneRef.current;
+    if (!scene) {
+      return;
+    }
+
+    const nextRegionPrisms: RegionPrism[] = [];
+    for (const regionPrism of regionPrismsRef.current) {
+      if (regionPrism.key === key) {
+        scene.remove(regionPrism.prism);
+      } else {
+        nextRegionPrisms.push(regionPrism);
+      }
+    }
+    regionPrismsRef.current = nextRegionPrisms;
+    setRegions((prev) => prev.filter((region) => region.key !== key));
+    setSelectedRegionKey((prev) => (prev === key ? null : prev));
+  }, []);
+
+  const handleClearRegions = useCallback((): void => {
+    const scene = sceneRef.current;
+    if (!scene) {
+      return;
+    }
+
+    for (const regionPrism of regionPrismsRef.current) {
+      scene.remove(regionPrism.prism);
+    }
+    regionPrismsRef.current = [];
+    setRegions([]);
+    setSelectedRegionKey(null);
   }, []);
 
   return (
@@ -369,6 +515,10 @@ export function Visualiser() {
         status={status}
         regions={regions}
         latestRegion={latestRegion}
+        selectedRegionKey={selectedRegionKey}
+        onSelectRegion={handleSelectRegion}
+        onDeleteRegion={handleDeleteRegion}
+        onClearRegions={handleClearRegions}
       />
     </div>
   );

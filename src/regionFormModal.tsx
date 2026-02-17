@@ -28,17 +28,17 @@ export function RegionFormModal(props: RegionFormModalProps) {
 
   return (
     <dialog
-      className="region-dialog"
+      className="modal"
       open
       onCancel={(event) => {
         event.preventDefault();
         onCancelSelection();
       }}
     >
-      <div className="region-dialog-scrim">
-        <div className="region-dialog-card">
-        <div className="region-dialog-title">Save Region</div>
-        <div className="region-dialog-stats">
+      <div className="modal-scrim">
+        <div className="modal-card">
+        <div className="modal-title">Save Region</div>
+        <div className="modal-stats">
           <div>Points: <strong>{pendingSelection.pointCount}</strong></div>
           <div>
             W min/max: <strong>{pendingSelection.minW.toFixed(3)}</strong> /{" "}
@@ -46,11 +46,11 @@ export function RegionFormModal(props: RegionFormModalProps) {
           </div>
           <div>W avg: <strong>{pendingSelection.avgW.toFixed(3)}</strong></div>
         </div>
-        <label className="region-dialog-label">
+        <label className="label">
           Region ID
         </label>
         <input
-          className="region-dialog-input"
+          className="input"
           ref={inputRef}
           type="text"
           defaultValue={pendingSelection.suggestedId}
@@ -61,16 +61,16 @@ export function RegionFormModal(props: RegionFormModalProps) {
             }
           }}
         />
-        <div className="region-dialog-actions">
+        <div className="actions">
           <button
-            className="region-dialog-btn"
+            className="btn"
             type="button"
             onClick={onCancelSelection}
           >
             Cancel
           </button>
           <button
-            className="region-dialog-btn-primary"
+            className="btn btn-primary"
             type="button"
             onClick={submitPendingSelection}
           >
