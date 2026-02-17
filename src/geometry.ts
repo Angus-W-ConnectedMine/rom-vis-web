@@ -149,21 +149,15 @@ export function fitCameraToPointCloud(
   controls.update();
 }
 
-export function getPointBoundsInScreenSelection(
+export function getPointsInScreenSelection(
   points: Point[],
   camera: THREE.PerspectiveCamera,
   viewportWidth: number,
   viewportHeight: number,
   selectionRect: ScreenSelectionRect,
-): THREE.Box3 | null {
+): Point[] {
   const projected = new THREE.Vector3();
-
-  let minX = Infinity;
-  let minY = Infinity;
-  let minZ = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let maxZ = -Infinity;
+  const selected: Point[] = [];
 
   for (const point of points) {
     projected.set(point.x, point.y, point.z).project(camera);
@@ -184,47 +178,204 @@ export function getPointBoundsInScreenSelection(
       continue;
     }
 
-    if (point.x < minX) minX = point.x;
-    if (point.y < minY) minY = point.y;
-    if (point.z < minZ) minZ = point.z;
-    if (point.x > maxX) maxX = point.x;
-    if (point.y > maxY) maxY = point.y;
-    if (point.z > maxZ) maxZ = point.z;
+    selected.push(point);
   }
 
-  if (!Number.isFinite(minX)) {
+  return selected;
+}
+
+function cross2D(o: THREE.Vector2, a: THREE.Vector2, b: THREE.Vector2): number {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+function getConvexHullXY(points: Point[]): THREE.Vector2[] {
+  const sorted = points
+    .map((point) => new THREE.Vector2(point.x, point.y))
+    .sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+
+  if (sorted.length <= 1) {
+    return sorted;
+  }
+
+  const unique: THREE.Vector2[] = [];
+  for (const point of sorted) {
+    const last = unique[unique.length - 1];
+    if (!last || last.x !== point.x || last.y !== point.y) {
+      unique.push(point);
+    }
+  }
+
+  if (unique.length <= 1) {
+    return unique;
+  }
+
+  const lower: THREE.Vector2[] = [];
+  for (const point of unique) {
+    while (
+      lower.length >= 2 &&
+      cross2D(lower[lower.length - 2] as THREE.Vector2, lower[lower.length - 1] as THREE.Vector2, point) <= 0
+    ) {
+      lower.pop();
+    }
+    lower.push(point);
+  }
+
+  const upper: THREE.Vector2[] = [];
+  for (let i = unique.length - 1; i >= 0; i -= 1) {
+    const point = unique[i] as THREE.Vector2;
+    while (
+      upper.length >= 2 &&
+      cross2D(upper[upper.length - 2] as THREE.Vector2, upper[upper.length - 1] as THREE.Vector2, point) <= 0
+    ) {
+      upper.pop();
+    }
+    upper.push(point);
+  }
+
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+function getFallbackFootprint(points: Point[]): THREE.Vector2[] {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+
+  const epsilon = 0.001;
+  if (minX === maxX) {
+    minX -= epsilon;
+    maxX += epsilon;
+  }
+  if (minY === maxY) {
+    minY -= epsilon;
+    maxY += epsilon;
+  }
+
+  return [
+    new THREE.Vector2(minX, minY),
+    new THREE.Vector2(maxX, minY),
+    new THREE.Vector2(maxX, maxY),
+    new THREE.Vector2(minX, maxY),
+  ];
+}
+
+function getEnclosingPolygonFromDirections(
+  points: Point[],
+  maxVertices: number,
+): THREE.Vector2[] {
+  const vertices = Math.max(3, maxVertices);
+  const normals = new Array<THREE.Vector2>(vertices);
+  const offsets = new Array<number>(vertices);
+
+  for (let i = 0; i < vertices; i += 1) {
+    const angle = (2 * Math.PI * i) / vertices;
+    const normal = new THREE.Vector2(Math.cos(angle), Math.sin(angle));
+    normals[i] = normal;
+
+    let maxDot = -Infinity;
+    for (const point of points) {
+      const dot = normal.x * point.x + normal.y * point.y;
+      if (dot > maxDot) {
+        maxDot = dot;
+      }
+    }
+    offsets[i] = maxDot;
+  }
+
+  const polygon: THREE.Vector2[] = [];
+  for (let i = 0; i < vertices; i += 1) {
+    const n1 = normals[i] as THREE.Vector2;
+    const n2 = normals[(i + 1) % vertices] as THREE.Vector2;
+    const d1 = offsets[i] as number;
+    const d2 = offsets[(i + 1) % vertices] as number;
+
+    const det = n1.x * n2.y - n1.y * n2.x;
+    if (Math.abs(det) < 1e-8) {
+      continue;
+    }
+
+    const x = (d1 * n2.y - n1.y * d2) / det;
+    const y = (n1.x * d2 - d1 * n2.x) / det;
+    polygon.push(new THREE.Vector2(x, y));
+  }
+
+  return polygon;
+}
+
+function getPrismFootprint(points: Point[], maxVertices: number): THREE.Vector2[] {
+  const hull = getConvexHullXY(points);
+  if (hull.length >= 3 && hull.length <= maxVertices) {
+    return hull;
+  }
+
+  const rough = getEnclosingPolygonFromDirections(points, maxVertices);
+  if (rough.length >= 3) {
+    return rough;
+  }
+
+  return getFallbackFootprint(points);
+}
+
+export function addSelectionPrism(
+  scene: THREE.Scene,
+  selectedPoints: Point[],
+  maxVertices = 20,
+): THREE.Group | null {
+  if (selectedPoints.length === 0) {
     return null;
   }
 
-  return new THREE.Box3(
-    new THREE.Vector3(minX, minY, minZ),
-    new THREE.Vector3(maxX, maxY, maxZ),
-  );
-}
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const point of selectedPoints) {
+    if (point.z < minZ) minZ = point.z;
+    if (point.z > maxZ) maxZ = point.z;
+  }
 
-export function addSelectionCube(
-  scene: THREE.Scene,
-  bounds: THREE.Box3,
-): THREE.Mesh {
-  const size = bounds.getSize(new THREE.Vector3());
-  const center = bounds.getCenter(new THREE.Vector3());
-  const epsilon = 0.0001;
+  const footprint = getPrismFootprint(selectedPoints, maxVertices);
+  if (footprint.length < 3) {
+    return null;
+  }
 
-  const geometry = new THREE.BoxGeometry(
-    Math.max(size.x, epsilon),
-    Math.max(size.y, epsilon),
-    Math.max(size.z, epsilon),
-  );
+  const shape = new THREE.Shape(footprint);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(maxZ - minZ, 0.0001),
+    bevelEnabled: false,
+    steps: 1,
+  });
 
   const material = new THREE.MeshBasicMaterial({
     color: 0x22d3ee,
-    wireframe: true,
+    wireframe: false,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.12,
+    depthWrite: false,
   });
 
-  const cube = new THREE.Mesh(geometry, material);
-  cube.position.copy(center);
-  scene.add(cube);
-  return cube;
+  const prismMesh = new THREE.Mesh(geometry, material);
+
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geometry),
+    new THREE.LineBasicMaterial({
+      color: 0x22d3ee,
+      transparent: true,
+      opacity: 0.95,
+    }),
+  );
+
+  const prism = new THREE.Group();
+  prism.add(prismMesh);
+  prism.add(edges);
+  prism.position.z = minZ;
+  scene.add(prism);
+  return prism;
 }

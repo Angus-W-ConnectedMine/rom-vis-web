@@ -2,16 +2,16 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   addPointCloud,
-  addSelectionCube,
+  addSelectionPrism,
   fitCameraToPointCloud,
-  getPointBoundsInScreenSelection,
+  getPointsInScreenSelection,
 } from "./geometry";
 import type { Point } from "./points";
 
 interface SelectionRegion {
   min: Point;
   max: Point;
-  cube: THREE.Mesh;
+  prism: THREE.Group;
 }
 
 function getRootElement(): HTMLElement {
@@ -151,7 +151,7 @@ function bindRegionSelection(
       return;
     }
 
-    const bounds = getPointBoundsInScreenSelection(
+    const selectedPoints = getPointsInScreenSelection(
       points,
       camera,
       renderer.domElement.clientWidth,
@@ -159,15 +159,35 @@ function bindRegionSelection(
       { minX, maxX, minY, maxY },
     );
 
-    if (!bounds) {
+    if (selectedPoints.length === 0) {
       return;
     }
 
-    const cube = addSelectionCube(scene, bounds);
+    let regionMinX = Infinity;
+    let regionMinY = Infinity;
+    let regionMinZ = Infinity;
+    let regionMaxX = -Infinity;
+    let regionMaxY = -Infinity;
+    let regionMaxZ = -Infinity;
+
+    for (const point of selectedPoints) {
+      if (point.x < regionMinX) regionMinX = point.x;
+      if (point.y < regionMinY) regionMinY = point.y;
+      if (point.z < regionMinZ) regionMinZ = point.z;
+      if (point.x > regionMaxX) regionMaxX = point.x;
+      if (point.y > regionMaxY) regionMaxY = point.y;
+      if (point.z > regionMaxZ) regionMaxZ = point.z;
+    }
+
+    const prism = addSelectionPrism(scene, selectedPoints, 20);
+    if (!prism) {
+      return;
+    }
+
     regions.push({
-      min: { x: bounds.min.x, y: bounds.min.y, z: bounds.min.z },
-      max: { x: bounds.max.x, y: bounds.max.y, z: bounds.max.z },
-      cube,
+      min: { x: regionMinX, y: regionMinY, z: regionMinZ },
+      max: { x: regionMaxX, y: regionMaxY, z: regionMaxZ },
+      prism,
     });
   }
 
