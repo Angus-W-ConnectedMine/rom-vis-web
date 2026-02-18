@@ -11,16 +11,13 @@ export interface PlanOutcomeItem {
   planItemId: string;
   regionId: string;
   regionPointCount: number;
-  regionTotalW: number;
   regionAverageW: number;
   extractedPointCount: number;
-  extractedTotalW: number;
   extractedAverageW: number;
 }
 
 export interface PlanGrandTotal {
   extractedPointCount: number;
-  totalW: number;
   averageW: number;
 }
 
@@ -104,17 +101,17 @@ export default function OperationalPlan({
                   <input
                     type="number"
                     min={0}
-                    step={1}
+                    step={10}
                     value={item.quantity}
                     onChange={(event) => onUpdatePlanQuantity(item.id, Number(event.target.value))}
                   />
                 </div>
                 {itemOutcome ? (
                   <div className="display-grid">
-                    <span>Region grade (avg/total):</span>
-                    <span>{itemOutcome.regionAverageW.toFixed(2)} / {itemOutcome.regionTotalW.toFixed(2)}</span>
-                    <span>Extracted grade (avg/total):</span>
-                    <span>{itemOutcome.extractedAverageW.toFixed(2)} / {itemOutcome.extractedTotalW.toFixed(2)}</span>
+                    <span>Region grade (avg):</span>
+                    <span>{itemOutcome.regionAverageW.toFixed(2)}</span>
+                    <span>Extracted grade (avg):</span>
+                    <span>{itemOutcome.extractedAverageW.toFixed(2)}</span>
                   </div>
                 ) : null}
                     </>
@@ -131,8 +128,6 @@ export default function OperationalPlan({
         <div className="display-grid">
           <span>Extracted points:</span>
           <span>{grandTotal.extractedPointCount}</span>
-          <span>Total grade:</span>
-          <span>{grandTotal.totalW.toFixed(1)}</span>
           <span>Average grade:</span>
           <span>{grandTotal.averageW.toFixed(1)}</span>
         </div>

@@ -139,7 +139,6 @@ function sumW(points: Point[]): number {
 function getEmptyGrandTotal(): PlanGrandTotal {
   return {
     extractedPointCount: 0,
-    totalW: 0,
     averageW: 0,
   };
 }
@@ -171,7 +170,7 @@ export function computePlanStats(
   const outcomeByItemId: Record<string, PlanOutcomeItem> = {};
   const extractedPointsByItemId: Record<string, Point[]> = {};
   let grandExtractedPointCount = 0;
-  let grandTotalW = 0;
+  let grandExtractedW = 0;
 
   for (const item of plan) {
     const region = regionByKey.get(item.regionKey);
@@ -179,15 +178,12 @@ export function computePlanStats(
       continue;
     }
 
-    const regionTotalW = region.avgW * region.pointCount;
     outcomeByItemId[item.id] = {
       planItemId: item.id,
       regionId: region.regionId,
       regionPointCount: region.pointCount,
-      regionTotalW,
       regionAverageW: region.avgW,
       extractedPointCount: 0,
-      extractedTotalW: 0,
       extractedAverageW: 0,
     };
     extractedPointsByItemId[item.id] = [];
@@ -215,10 +211,8 @@ export function computePlanStats(
           planItemId: item.id,
           regionId: region.regionId,
           regionPointCount,
-          regionTotalW,
           regionAverageW,
           extractedPointCount: 0,
-          extractedTotalW: 0,
           extractedAverageW: 0,
         };
         extractedPointsByItemId[item.id] = [];
@@ -249,15 +243,13 @@ export function computePlanStats(
       const extractedTotalW = sumW(takenPoints);
       const extractedAverageW = takeCount > 0 ? extractedTotalW / takeCount : 0;
       grandExtractedPointCount += takeCount;
-      grandTotalW += extractedTotalW;
+      grandExtractedW += extractedTotalW;
       outcomeByItemId[item.id] = {
         planItemId: item.id,
         regionId: region.regionId,
         regionPointCount,
-        regionTotalW,
         regionAverageW,
         extractedPointCount: takeCount,
-        extractedTotalW,
         extractedAverageW,
       };
       extractedPointsByItemId[item.id] = takenPoints;
@@ -269,8 +261,7 @@ export function computePlanStats(
     outcomeByItemId,
     grandTotal: {
       extractedPointCount: grandExtractedPointCount,
-      totalW: grandTotalW,
-      averageW: grandExtractedPointCount > 0 ? grandTotalW / grandExtractedPointCount : 0,
+      averageW: grandExtractedPointCount > 0 ? grandExtractedW / grandExtractedPointCount : 0,
     },
     extractedPointsByItemId,
   };
