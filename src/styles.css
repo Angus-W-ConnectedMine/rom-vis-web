@@ -78,6 +78,31 @@ body {
   margin-bottom: 10px;
 }
 
+.overlay-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.overlay-tab-btn {
+  text-align: center;
+}
+
+.overlay-tab-btn.is-active {
+  border-color: var(--selection-cyan);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.2);
+}
+
+.overlay-tab-content {
+  display: grid;
+  gap: 10px;
+}
+
+.overlay-summary-card h4 {
+  margin: 0 0 10px;
+}
+
 .overlay-count {
   margin-bottom: 8px;
 }
