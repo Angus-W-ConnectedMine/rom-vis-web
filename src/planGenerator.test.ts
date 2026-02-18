@@ -42,7 +42,7 @@ function gridPoints(
 }
 
 describe("plan angle validity", () => {
-  test("treats boundary-touching cloud as edge-valid", () => {
+  test("marks all angles invalid when cloud fully covers the prism footprint", () => {
     const prism = makeRectPrism("region-a", -10, -10, 10, 10);
     const points = gridPoints(-10, -10, 10, 10, 1);
 
@@ -50,7 +50,7 @@ describe("plan angle validity", () => {
     const allowed = allowedByRegion.get("region-a");
 
     expect(allowed).toBeDefined();
-    expect(allowed?.size).toBe(360);
+    expect(allowed?.size).toBe(0);
   });
 
   test("keeps at least some angles valid when cloud is compact in the center", () => {

@@ -154,95 +154,18 @@ function scoreStats(stats: PlanStats, desiredTotalPoints: number, desiredGrade: 
   return score;
 }
 
-function cross2D(o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-}
-
-function getConvexHullXY(points: Point[]): Array<{ x: number; y: number }> {
-  const sorted = points
-    .map((point) => ({ x: point.x, y: point.y }))
-    .sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
-
-  if (sorted.length <= 1) {
-    return sorted;
+function getPolygonArea(footprint: Array<{ x: number; y: number }>): number {
+  if (footprint.length < 3) {
+    return 0;
   }
 
-  const unique: Array<{ x: number; y: number }> = [];
-  for (const point of sorted) {
-    const last = unique[unique.length - 1];
-    if (!last || last.x !== point.x || last.y !== point.y) {
-      unique.push(point);
-    }
+  let areaTwice = 0;
+  for (let i = 0; i < footprint.length; i += 1) {
+    const current = footprint[i]!;
+    const next = footprint[(i + 1) % footprint.length]!;
+    areaTwice += current.x * next.y - next.x * current.y;
   }
-
-  if (unique.length <= 1) {
-    return unique;
-  }
-
-  const lower: Array<{ x: number; y: number }> = [];
-  for (const point of unique) {
-    while (lower.length >= 2 && cross2D(lower[lower.length - 2]!, lower[lower.length - 1]!, point) <= 0) {
-      lower.pop();
-    }
-    lower.push(point);
-  }
-
-  const upper: Array<{ x: number; y: number }> = [];
-  for (let i = unique.length - 1; i >= 0; i -= 1) {
-    const point = unique[i]!;
-    while (upper.length >= 2 && cross2D(upper[upper.length - 2]!, upper[upper.length - 1]!, point) <= 0) {
-      upper.pop();
-    }
-    upper.push(point);
-  }
-
-  lower.pop();
-  upper.pop();
-  return lower.concat(upper);
-}
-
-function isPointOnSegment(
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-): boolean {
-  const epsilon = 1e-9;
-  const cross = (px - ax) * (by - ay) - (py - ay) * (bx - ax);
-  if (Math.abs(cross) > epsilon) {
-    return false;
-  }
-
-  const dot = (px - ax) * (bx - ax) + (py - ay) * (by - ay);
-  if (dot < -epsilon) {
-    return false;
-  }
-
-  const lengthSquared = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
-  return dot <= lengthSquared + epsilon;
-}
-
-function isPointInsidePolygonStrict(x: number, y: number, polygon: Array<{ x: number; y: number }>): boolean {
-  let inside = false;
-
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const a = polygon[i]!;
-    const b = polygon[j]!;
-
-    if (isPointOnSegment(x, y, a.x, a.y, b.x, b.y)) {
-      return false;
-    }
-
-    const intersects = ((a.y > y) !== (b.y > y)) &&
-      (x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x);
-    if (intersects) {
-      inside = !inside;
-    }
-  }
-
-  return inside;
+  return Math.abs(areaTwice) * 0.5;
 }
 
 function getAllowedAnglesForRegion(
@@ -253,13 +176,11 @@ function getAllowedAnglesForRegion(
     return ALL_ANGLES;
   }
 
-  const hull = getConvexHullXY(regionPoints);
-  if (hull.length < 3) {
-    return ALL_ANGLES;
-  }
-
   const center = getRegionCenter(prism.snapshot);
   const allowedAngles: number[] = [];
+  const footprintArea = getPolygonArea(prism.snapshot.footprint);
+  const averagePointSpacing = Math.sqrt(Math.max(1e-6, footprintArea) / Math.max(1, regionPoints.length));
+  const insideDistanceThreshold = Math.max(0.25, averagePointSpacing * 0.85);
 
   for (let angle = 0; angle < 360; angle += 1) {
     const radians = THREE.MathUtils.degToRad(angle);
@@ -267,7 +188,19 @@ function getAllowedAnglesForRegion(
     const outwardDistance = getDistanceToPrismEdge(prism.snapshot, center, outward);
     const startX = center.x + outward.x * outwardDistance;
     const startY = center.y + outward.y * outwardDistance;
-    const angleIsInvalid = isPointInsidePolygonStrict(startX, startY, hull);
+    let nearestDistance = Infinity;
+    for (const point of regionPoints) {
+      const dx = point.x - startX;
+      const dy = point.y - startY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+      }
+      if (nearestDistance <= insideDistanceThreshold) {
+        break;
+      }
+    }
+    const angleIsInvalid = nearestDistance <= insideDistanceThreshold;
 
     if (!angleIsInvalid) {
       allowedAngles.push(angle);
