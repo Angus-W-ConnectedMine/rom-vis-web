@@ -353,6 +353,12 @@ button:hover:not(:disabled) {
 
 .plan-item-actions {
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.plan-item-actions span {
+  flex: 1 1 auto;
 }
 
 .plan-item input[type="range"] {
