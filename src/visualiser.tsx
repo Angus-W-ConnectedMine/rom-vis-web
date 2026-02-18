@@ -8,6 +8,7 @@ import {
   getPrismSnapshot,
   addSelectionPrism,
   getPointsInScreenSelection,
+  restorePrism,
   toStoredPrism,
   type PrismSnapshot,
   getRegionCenter,
@@ -144,6 +145,72 @@ function getRegionMetaFromSelection(
   };
 }
 
+function buildInsideDebugSnapshots(points: Point[], gridResolution = 22): PrismSnapshot[] {
+  if (points.length === 0) {
+    return [];
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.z < minZ) minZ = point.z;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+    if (point.z > maxZ) maxZ = point.z;
+  }
+
+  const columns = Math.max(4, gridResolution);
+  const rows = Math.max(4, gridResolution);
+  const width = Math.max(1e-6, maxX - minX);
+  const height = Math.max(1e-6, maxY - minY);
+  const cellWidth = width / columns;
+  const cellHeight = height / rows;
+  const counts = new Array<number>(columns * rows).fill(0);
+
+  for (const point of points) {
+    const xNorm = (point.x - minX) / width;
+    const yNorm = (point.y - minY) / height;
+    const column = THREE.MathUtils.clamp(Math.floor(xNorm * columns), 0, columns - 1);
+    const row = THREE.MathUtils.clamp(Math.floor(yNorm * rows), 0, rows - 1);
+    const index = row * columns + column;
+    counts[index] = (counts[index] ?? 0) + 1;
+  }
+
+  const snapshots: PrismSnapshot[] = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const count = counts[row * columns + column];
+      if (!count) {
+        continue;
+      }
+
+      const x0 = minX + column * cellWidth;
+      const x1 = x0 + cellWidth;
+      const y0 = minY + row * cellHeight;
+      const y1 = y0 + cellHeight;
+      snapshots.push({
+        minZ,
+        maxZ,
+        footprint: [
+          { x: x0, y: y0 },
+          { x: x1, y: y0 },
+          { x: x1, y: y1 },
+          { x: x0, y: y1 },
+        ],
+      });
+    }
+  }
+
+  return snapshots;
+}
+
 
 export function Visualiser() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -167,7 +234,10 @@ export function Visualiser() {
   const [targetGrade, setTargetGrade] = useState(1);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [planGenerationProgress, setPlanGenerationProgress] = useState<GeneratePlanProgress | null>(null);
+  const [showInsideDebugPrisms, setShowInsideDebugPrisms] = useState(false);
+  const [insideDebugPrismCount, setInsideDebugPrismCount] = useState(0);
   const generateRunIdRef = useRef(0);
+  const debugInsidePrismsRef = useRef<THREE.Group[]>([]);
 
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const editingRegionKeyRef = useRef<string | null>(null);
@@ -350,6 +420,48 @@ export function Visualiser() {
     extractedPointsByItemId: planStats.extractedPointsByItemId,
     invalidPlanItemIds,
   });
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) {
+      return;
+    }
+
+    for (const prism of debugInsidePrismsRef.current) {
+      scene.remove(prism);
+    }
+    debugInsidePrismsRef.current = [];
+    setInsideDebugPrismCount(0);
+
+    if (!showInsideDebugPrisms) {
+      return;
+    }
+
+    const snapshots = buildInsideDebugSnapshots(pointsRef.current);
+    const created: THREE.Group[] = [];
+    for (const snapshot of snapshots) {
+      const prism = restorePrism(scene, snapshot);
+      if (!prism) {
+        continue;
+      }
+      prism.traverse((node) => {
+        if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshBasicMaterial) {
+          node.material.color.setHex(0x38bdf8);
+          node.material.opacity = 0.08;
+          node.material.needsUpdate = true;
+        }
+        if (node instanceof THREE.LineSegments && node.material instanceof THREE.LineBasicMaterial) {
+          node.material.color.setHex(0x7dd3fc);
+          node.material.opacity = 0.35;
+          node.material.needsUpdate = true;
+        }
+      });
+      created.push(prism);
+    }
+
+    debugInsidePrismsRef.current = created;
+    setInsideDebugPrismCount(created.length);
+  }, [showInsideDebugPrisms, regions.length]);
 
   const handleAddRegionToPlan = useCallback((region: RegionMeta): void => {
     const planItemId = crypto.randomUUID();
@@ -567,6 +679,10 @@ export function Visualiser() {
     setSelectedRegionKeys([]);
   }, []);
 
+  const handleToggleInsideDebugPrisms = useCallback((): void => {
+    setShowInsideDebugPrisms((prev) => !prev);
+  }, []);
+
   const editingRegion = editingRegionKey === null
     ? null
     : regions.find((region) => region.key === editingRegionKey) ?? null;
@@ -602,6 +718,9 @@ export function Visualiser() {
         onUpdateTargetGrade={handleUpdateTargetGrade}
         onGeneratePlan={handleGeneratePlan}
         onStopGeneratePlan={handleStopGeneratePlan}
+        showInsideDebugPrisms={showInsideDebugPrisms}
+        insideDebugPrismCount={insideDebugPrismCount}
+        onToggleInsideDebugPrisms={handleToggleInsideDebugPrisms}
       />
     </div>
   );

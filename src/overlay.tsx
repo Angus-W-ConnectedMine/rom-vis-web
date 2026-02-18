@@ -5,6 +5,7 @@ import { type PlanGrandTotal, type PlanItem, type PlanOutcomeItem } from "./Oper
 import { RegionTab } from "./RegionTab";
 import { PlanTab } from "./PlanTab";
 import type { GeneratePlanProgress } from "./planGenerator";
+import { DebugTab } from "./DebugTab";
 
 export interface SelectionRect {
   left: number;
@@ -52,6 +53,10 @@ interface OverlayProps {
   onUpdateTargetGrade: (value: number) => void;
   onGeneratePlan: () => void;
   onStopGeneratePlan: () => void;
+  showInsideDebugPrisms: boolean;
+  insideDebugPrismCount: number;
+  edgeDebugSampleCount: number;
+  onToggleInsideDebugPrisms: () => void;
 }
 
 function getSummary(regions: RegionMeta[], selectedRegionKeys: string[]) {
@@ -94,10 +99,14 @@ export function Overlay(props: OverlayProps) {
     onUpdateTargetGrade,
     onGeneratePlan,
     onStopGeneratePlan,
+    showInsideDebugPrisms,
+    insideDebugPrismCount,
+    edgeDebugSampleCount,
+    onToggleInsideDebugPrisms,
   } = props;
   const regionItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previousSelectedRegionKeysRef = useRef<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"regions" | "plan">("regions");
+  const [activeTab, setActiveTab] = useState<"regions" | "plan" | "debug">("regions");
 
   useEffect(() => {
     const previousSelectedRegionKeys = previousSelectedRegionKeysRef.current;
@@ -153,6 +162,16 @@ export function Overlay(props: OverlayProps) {
           >
             Plan
           </button>
+          <button
+            id="overlay-tab-debug"
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "debug"}
+            className={`overlay-tab-btn${activeTab === "debug" ? " is-active" : ""}`}
+            onClick={() => setActiveTab("debug")}
+          >
+            Debug
+          </button>
         </div>
 
         {activeTab === "regions" ? (
@@ -167,7 +186,7 @@ export function Overlay(props: OverlayProps) {
             onDeleteRegion={onDeleteRegion}
             onClearSelections={onClearSelections}
           />
-        ) : (
+        ) : activeTab === "plan" ? (
           <PlanTab
             regions={regions}
             plan={plan}
@@ -186,6 +205,13 @@ export function Overlay(props: OverlayProps) {
             onUpdateTargetGrade={onUpdateTargetGrade}
             onGeneratePlan={onGeneratePlan}
             onStopGeneratePlan={onStopGeneratePlan}
+          />
+        ) : (
+          <DebugTab
+            showInsideDebugPrisms={showInsideDebugPrisms}
+            insideDebugPrismCount={insideDebugPrismCount}
+            edgeDebugSampleCount={edgeDebugSampleCount}
+            onToggleInsideDebugPrisms={onToggleInsideDebugPrisms}
           />
         )}
       </aside>
