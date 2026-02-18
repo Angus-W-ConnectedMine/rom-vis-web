@@ -48,7 +48,6 @@ export function RegionFormModal(props: RegionFormModalProps) {
             Region ID
           </label>
           <input
-            className="input"
             ref={selectionIDInputRef}
             type="text"
             defaultValue={region.regionId}

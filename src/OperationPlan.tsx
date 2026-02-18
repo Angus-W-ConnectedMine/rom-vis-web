@@ -4,21 +4,45 @@ export interface PlanItem {
   id: string;
   regionKey: string;
   angle: number;
+  quantity: number;
+}
+
+export interface PlanOutcomeItem {
+  planItemId: string;
+  regionId: string;
+  regionPointCount: number;
+  regionTotalW: number;
+  regionAverageW: number;
+  extractedPointCount: number;
+  extractedTotalW: number;
+  extractedAverageW: number;
+}
+
+export interface PlanGrandTotal {
+  extractedPointCount: number;
+  totalW: number;
+  averageW: number;
 }
 
 interface OperationalPlanProps {
   regions: RegionMeta[];
   plan: PlanItem[];
+  outcomeByItemId: Record<string, PlanOutcomeItem>;
+  grandTotal: PlanGrandTotal;
   onAddRegionToPlan: (region: RegionMeta) => void;
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
+  onUpdatePlanQuantity: (planItemId: string, quantity: number) => void;
   onDeletePlanItem: (planItemId: string) => void;
 }
 
 export default function OperationalPlan({
   regions,
   plan,
+  outcomeByItemId,
+  grandTotal,
   onAddRegionToPlan,
   onUpdatePlanAngle,
+  onUpdatePlanQuantity,
   onDeletePlanItem,
 }: OperationalPlanProps) {
   return (
@@ -42,6 +66,10 @@ export default function OperationalPlan({
           <div className="plan-list">
             {plan.map((item) => (
               <div key={item.id} className="plan-item">
+                {(() => {
+                  const itemOutcome = outcomeByItemId[item.id];
+                  return (
+                    <>
                 <div className="plan-item-row">
                   <strong>{regions.find((region) => region.key === item.regionKey)?.regionId ?? `region-${item.regionKey}`}</strong>
                   <div className="toolbar plan-item-actions">
@@ -71,10 +99,43 @@ export default function OperationalPlan({
                   value={item.angle}
                   onChange={(event) => onUpdatePlanAngle(item.id, Number(event.target.value))}
                 />
+                <div className="display-grid">
+                  <span>Quantity:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={item.quantity}
+                    onChange={(event) => onUpdatePlanQuantity(item.id, Number(event.target.value))}
+                  />
+                </div>
+                {itemOutcome ? (
+                  <div className="display-grid">
+                    <span>Region grade (avg/total):</span>
+                    <span>{itemOutcome.regionAverageW.toFixed(2)} / {itemOutcome.regionTotalW.toFixed(2)}</span>
+                    <span>Extracted grade (avg/total):</span>
+                    <span>{itemOutcome.extractedAverageW.toFixed(2)} / {itemOutcome.extractedTotalW.toFixed(2)}</span>
+                  </div>
+                ) : null}
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>
         )}
+      </div>
+
+      <h3>Outcome:</h3>
+      <div className="plan-item">
+        <div className="display-grid">
+          <span>Extracted points:</span>
+          <span>{grandTotal.extractedPointCount}</span>
+          <span>Total grade:</span>
+          <span>{grandTotal.totalW.toFixed(1)}</span>
+          <span>Average grade:</span>
+          <span>{grandTotal.averageW.toFixed(1)}</span>
+        </div>
       </div>
     </div>
   );

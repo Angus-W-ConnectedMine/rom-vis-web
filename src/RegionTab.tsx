@@ -97,7 +97,7 @@ export function RegionTab({
                 </div>
               </div>
               <div className="overlay-region-meta">
-                points: {region.pointCount} | W min/max/avg: {region.minW.toFixed(3)} / {region.maxW.toFixed(3)} / {region.avgW.toFixed(3)}
+                Points: {region.pointCount} | Avg. grade: {region.avgW.toFixed(1)}
               </div>
             </div>
           ))}
@@ -117,8 +117,8 @@ export function RegionTab({
           <span>Total points: </span>
           <span>{summary.totalPoints}</span>
 
-          <span>Average w: </span>
-          <span>{summary.averageW.toFixed(3)}</span>
+          <span>Average grade: </span>
+          <span>{summary.averageW.toFixed(1)}</span>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
@@ -13,7 +13,6 @@ import {
   getPointsInScreenSelection,
   toStoredPrism,
   type PrismSnapshot,
-  getDistanceToPrismEdge,
   getRegionCenter,
 } from "./geometry";
 import {
@@ -21,7 +20,7 @@ import {
   type RegionMeta,
   type SelectionRect,
 } from "./overlay";
-import type { PlanItem } from "./OperationPlan";
+import type { PlanGrandTotal, PlanItem, PlanOutcomeItem } from "./OperationPlan";
 import type { Point } from "./points";
 import {
   loadStoredPlan,
@@ -39,14 +38,17 @@ interface RegionPrism {
   label: CSS2DObject;
 }
 
+interface PlanStats {
+  outcomeByItemId: Record<string, PlanOutcomeItem>;
+  grandTotal: PlanGrandTotal;
+  extractedPointsByItemId: Record<string, Point[]>;
+}
+
 const REGION_DEFAULT_COLOR = 0x22d3ee;
 const REGION_SELECTED_COLOR = 0xf59e0b;
 
-const PLAN_ARROW_COLOR = 0xf8fafc;
-const PLAN_ARROW_LENGTH = 12;
-const PLAN_ARROW_HEAD_LENGTH = 4;
-const PLAN_ARROW_HEAD_WIDTH = 4;
-const PLAN_ARROW_EDGE_GAP = 4;
+const PLAN_EXTRACTION_COLOR = 0xff4d00;
+const PLAN_EXTRACTION_OPACITY = 0.3;
 const REGION_LABEL_Z_OFFSET = 1.5;
 
 function createScene(): THREE.Scene {
@@ -225,6 +227,267 @@ function getRegionMetaFromSelection(
   };
 }
 
+function getDepthFromRegionEdge(
+  point: Point,
+  center: THREE.Vector3,
+  outward: THREE.Vector3,
+  maxProjection: number,
+): number {
+  const projection =
+    (point.x - center.x) * outward.x +
+    (point.y - center.y) * outward.y;
+  return maxProjection - projection;
+}
+
+function clipPolygonByHalfPlane(
+  polygon: Array<{ x: number; y: number }>,
+  outward: THREE.Vector3,
+  threshold: number,
+): Array<{ x: number; y: number }> {
+  if (polygon.length < 3) {
+    return [];
+  }
+
+  const inside = (point: { x: number; y: number }): boolean =>
+    (point.x * outward.x + point.y * outward.y) >= threshold;
+
+  const intersect = (
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+  ): { x: number; y: number } | null => {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const denominator = dx * outward.x + dy * outward.y;
+    if (Math.abs(denominator) < 1e-8) {
+      return null;
+    }
+    const t = (threshold - (start.x * outward.x + start.y * outward.y)) / denominator;
+    if (t < 0 || t > 1) {
+      return null;
+    }
+    return {
+      x: start.x + t * dx,
+      y: start.y + t * dy,
+    };
+  };
+
+  const result: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i < polygon.length; i += 1) {
+    const current = polygon[i] as { x: number; y: number };
+    const next = polygon[(i + 1) % polygon.length] as { x: number; y: number };
+    const currentInside = inside(current);
+    const nextInside = inside(next);
+
+    if (currentInside && nextInside) {
+      result.push(next);
+      continue;
+    }
+
+    if (currentInside && !nextInside) {
+      const crossing = intersect(current, next);
+      if (crossing) {
+        result.push(crossing);
+      }
+      continue;
+    }
+
+    if (!currentInside && nextInside) {
+      const crossing = intersect(current, next);
+      if (crossing) {
+        result.push(crossing);
+      }
+      result.push(next);
+    }
+  }
+
+  return result;
+}
+
+function createExtractionSnapshot(
+  regionSnapshot: PrismSnapshot,
+  itemAngle: number,
+  takenPoints: Point[],
+): PrismSnapshot | null {
+  if (takenPoints.length === 0 || regionSnapshot.footprint.length < 3) {
+    return null;
+  }
+
+  const angleRadians = THREE.MathUtils.degToRad(itemAngle);
+  const outward = new THREE.Vector3(Math.cos(angleRadians), Math.sin(angleRadians), 0);
+
+  let threshold = Infinity;
+  for (const point of takenPoints) {
+    const projection = point.x * outward.x + point.y * outward.y;
+    if (projection < threshold) {
+      threshold = projection;
+    }
+  }
+
+  if (!Number.isFinite(threshold)) {
+    return null;
+  }
+
+  const clippedFootprint = clipPolygonByHalfPlane(regionSnapshot.footprint, outward, threshold);
+  if (clippedFootprint.length < 3) {
+    return null;
+  }
+
+  return {
+    minZ: regionSnapshot.minZ,
+    maxZ: regionSnapshot.maxZ,
+    footprint: clippedFootprint,
+  };
+}
+
+function sumW(points: Point[]): number {
+  let total = 0;
+  for (const point of points) {
+    total += point.w;
+  }
+  return total;
+}
+
+function getEmptyGrandTotal(): PlanGrandTotal {
+  return {
+    extractedPointCount: 0,
+    totalW: 0,
+    averageW: 0,
+  };
+}
+
+function computePlanStats(
+  regions: RegionMeta[],
+  plan: PlanItem[],
+  regionPrisms: RegionPrism[],
+  points: Point[],
+): PlanStats {
+  if (plan.length === 0 || regions.length === 0 || regionPrisms.length === 0 || points.length === 0) {
+    return {
+      outcomeByItemId: {},
+      grandTotal: getEmptyGrandTotal(),
+      extractedPointsByItemId: {},
+    };
+  }
+
+  const regionByKey = new Map(regions.map((region) => [region.key, region]));
+  const prismByKey = new Map(regionPrisms.map((regionPrism) => [regionPrism.key, regionPrism]));
+  const itemsByRegionKey = new Map<string, PlanItem[]>();
+
+  for (const item of plan) {
+    const list = itemsByRegionKey.get(item.regionKey) ?? [];
+    list.push(item);
+    itemsByRegionKey.set(item.regionKey, list);
+  }
+
+  const outcomeByItemId: Record<string, PlanOutcomeItem> = {};
+  const extractedPointsByItemId: Record<string, Point[]> = {};
+  let grandExtractedPointCount = 0;
+  let grandTotalW = 0;
+
+  for (const item of plan) {
+    const region = regionByKey.get(item.regionKey);
+    if (!region) {
+      continue;
+    }
+
+    const regionTotalW = region.avgW * region.pointCount;
+    outcomeByItemId[item.id] = {
+      planItemId: item.id,
+      regionId: region.regionId,
+      regionPointCount: region.pointCount,
+      regionTotalW,
+      regionAverageW: region.avgW,
+      extractedPointCount: 0,
+      extractedTotalW: 0,
+      extractedAverageW: 0,
+    };
+    extractedPointsByItemId[item.id] = [];
+  }
+
+  for (const [regionKey, items] of itemsByRegionKey) {
+    const region = regionByKey.get(regionKey);
+    const regionPrism = prismByKey.get(regionKey);
+    if (!region || !regionPrism) {
+      continue;
+    }
+
+    const regionPoints = getPointsInPrism(points, regionPrism.snapshot);
+    const regionPointCount = regionPoints.length;
+    const regionTotalW = sumW(regionPoints);
+    const regionAverageW = regionPointCount > 0 ? regionTotalW / regionPointCount : 0;
+    let remaining = regionPoints;
+
+    const center = getRegionCenter(regionPrism.snapshot);
+
+    for (const item of items) {
+      const quantity = Math.max(0, Math.round(item.quantity));
+      if (quantity === 0 || remaining.length === 0) {
+        outcomeByItemId[item.id] = {
+          planItemId: item.id,
+          regionId: region.regionId,
+          regionPointCount,
+          regionTotalW,
+          regionAverageW,
+          extractedPointCount: 0,
+          extractedTotalW: 0,
+          extractedAverageW: 0,
+        };
+        extractedPointsByItemId[item.id] = [];
+        continue;
+      }
+
+      const angleRadians = THREE.MathUtils.degToRad(item.angle);
+      const outward = new THREE.Vector3(Math.cos(angleRadians), Math.sin(angleRadians), 0);
+
+      let maxProjection = -Infinity;
+      for (const point of remaining) {
+        const projection =
+          (point.x - center.x) * outward.x +
+          (point.y - center.y) * outward.y;
+        if (projection > maxProjection) {
+          maxProjection = projection;
+        }
+      }
+
+      remaining = [...remaining]
+        .sort((a, b) =>
+          getDepthFromRegionEdge(a, center, outward, maxProjection) -
+          getDepthFromRegionEdge(b, center, outward, maxProjection),
+        );
+
+      const takeCount = Math.min(quantity, remaining.length);
+      const takenPoints = remaining.slice(0, takeCount);
+      const extractedTotalW = sumW(takenPoints);
+      const extractedAverageW = takeCount > 0 ? extractedTotalW / takeCount : 0;
+      grandExtractedPointCount += takeCount;
+      grandTotalW += extractedTotalW;
+      outcomeByItemId[item.id] = {
+        planItemId: item.id,
+        regionId: region.regionId,
+        regionPointCount,
+        regionTotalW,
+        regionAverageW,
+        extractedPointCount: takeCount,
+        extractedTotalW,
+        extractedAverageW,
+      };
+      extractedPointsByItemId[item.id] = takenPoints;
+      remaining = remaining.slice(takeCount);
+    }
+  }
+
+  return {
+    outcomeByItemId,
+    grandTotal: {
+      extractedPointCount: grandExtractedPointCount,
+      totalW: grandTotalW,
+      averageW: grandExtractedPointCount > 0 ? grandTotalW / grandExtractedPointCount : 0,
+    },
+    extractedPointsByItemId,
+  };
+}
+
 export function Visualiser() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -235,7 +498,7 @@ export function Visualiser() {
   const pointsRef = useRef<Point[]>([]);
   const pointOffsetRef = useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
   const regionPrismsRef = useRef<RegionPrism[]>([]);
-  const planArrowsRef = useRef<Map<string, THREE.ArrowHelper>>(new Map());
+  const planExtractionVolumesRef = useRef<Map<string, THREE.Group>>(new Map());
   const [regions, setRegions] = useState<RegionMeta[]>([]);
   const [selectedRegionKeys, setSelectedRegionKeys] = useState<string[]>([]);
   const [plan, setPlan] = useState<PlanItem[]>(() => loadStoredPlan());
@@ -246,6 +509,10 @@ export function Visualiser() {
 
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const editingRegionKeyRef = useRef<string | null>(null);
+  const planStats = useMemo(
+    () => computePlanStats(regions, plan, regionPrismsRef.current, pointsRef.current),
+    [regions, plan],
+  );
 
   useEffect(() => {
     editingRegionKeyRef.current = editingRegionKey;
@@ -257,57 +524,6 @@ export function Visualiser() {
         toStoredPrism(regionPrism.key, regionPrism.regionId, regionPrism.snapshot)
       ),
     );
-  }, []);
-
-  const syncPlanArrows = useCallback((items: PlanItem[]): void => {
-    const scene = sceneRef.current;
-    if (!scene) {
-      return;
-    }
-
-    const prismByKey = new Map(regionPrismsRef.current.map((regionPrism) => [regionPrism.key, regionPrism]));
-    const activeKeys = new Set<string>();
-
-    for (const item of items) {
-      const regionPrism = prismByKey.get(item.regionKey);
-      if (!regionPrism) {
-        continue;
-      }
-
-      activeKeys.add(item.id);
-      const center = getRegionCenter(regionPrism.snapshot);
-      const angleRadians = THREE.MathUtils.degToRad(item.angle);
-      const outward = new THREE.Vector3(Math.cos(angleRadians), Math.sin(angleRadians), 0);
-      const edgeDistance = getDistanceToPrismEdge(regionPrism.snapshot, center, outward);
-      const tip = center.clone().add(outward.clone().multiplyScalar(edgeDistance + PLAN_ARROW_EDGE_GAP));
-      const direction = center.clone().sub(tip).normalize();
-      const origin = tip.clone().add(outward.clone().multiplyScalar(PLAN_ARROW_LENGTH));
-
-      const existingArrow = planArrowsRef.current.get(item.id);
-      if (existingArrow) {
-        existingArrow.position.copy(origin);
-        existingArrow.setDirection(direction);
-        existingArrow.setLength(PLAN_ARROW_LENGTH, PLAN_ARROW_HEAD_LENGTH, PLAN_ARROW_HEAD_WIDTH);
-      } else {
-        const arrow = new THREE.ArrowHelper(
-          direction,
-          origin,
-          PLAN_ARROW_LENGTH,
-          PLAN_ARROW_COLOR,
-          PLAN_ARROW_HEAD_LENGTH,
-          PLAN_ARROW_HEAD_WIDTH,
-        );
-        scene.add(arrow);
-        planArrowsRef.current.set(item.id, arrow);
-      }
-    }
-
-    for (const [key, arrow] of planArrowsRef.current) {
-      if (!activeKeys.has(key)) {
-        scene.remove(arrow);
-        planArrowsRef.current.delete(key);
-      }
-    }
   }, []);
 
   useEffect(() => {
@@ -336,7 +552,7 @@ export function Visualiser() {
     controlsRef.current = controls;
     setInteractionElement(renderer.domElement);
     regionPrismsRef.current = [];
-    planArrowsRef.current.clear();
+    planExtractionVolumesRef.current.clear();
 
     const resize = (): void => {
       if (disposed) {
@@ -486,10 +702,10 @@ export function Visualiser() {
         scene.remove(regionPrism.label);
       }
       regionPrismsRef.current = [];
-      for (const arrow of planArrowsRef.current.values()) {
-        scene.remove(arrow);
+      for (const volume of planExtractionVolumesRef.current.values()) {
+        scene.remove(volume);
       }
-      planArrowsRef.current.clear();
+      planExtractionVolumesRef.current.clear();
       controls.dispose();
       renderer.dispose();
       labelRenderer.domElement.remove();
@@ -622,20 +838,85 @@ export function Visualiser() {
   }, [plan, regionsHydrated]);
 
   useEffect(() => {
-    syncPlanArrows(plan);
-  }, [plan, regions.length, syncPlanArrows]);
+    syncPlanExtractionVolumes(plan, planStats.extractedPointsByItemId);
+  }, [plan, planStats.extractedPointsByItemId]);
 
   const handleAddRegionToPlan = useCallback((region: RegionMeta): void => {
     const planItemId = crypto.randomUUID();
     setPlan((prev) => {
-      const next = [...prev, { id: planItemId, regionKey: region.key, angle: 0 }];
+      const next = [
+        ...prev,
+        {
+          id: planItemId,
+          regionKey: region.key,
+          angle: 0,
+          quantity: Math.max(0, Math.min(region.pointCount, 100)),
+        },
+      ];
       saveStoredPlan(next);
       return next;
     });
   }, []);
 
+  function syncPlanExtractionVolumes(items: PlanItem[], extractedPointsByItemId: Record<string, Point[]>): void {
+    const scene = sceneRef.current;
+    if (!scene) {
+      return;
+    }
+
+    const prismByKey = new Map(regionPrismsRef.current.map((regionPrism) => [regionPrism.key, regionPrism]));
+
+    for (const volume of planExtractionVolumesRef.current.values()) {
+      scene.remove(volume);
+    }
+    planExtractionVolumesRef.current.clear();
+
+    for (const item of items) {
+      const extractedPoints = extractedPointsByItemId[item.id] ?? [];
+      if (extractedPoints.length === 0) {
+        continue;
+      }
+
+      const regionPrism = prismByKey.get(item.regionKey);
+      if (!regionPrism) {
+        continue;
+      }
+
+      const extractionSnapshot = createExtractionSnapshot(
+        regionPrism.snapshot,
+        item.angle,
+        extractedPoints,
+      );
+      if (!extractionSnapshot) {
+        continue;
+      }
+
+      const extractionVolume = restorePrism(scene, extractionSnapshot);
+      if (!extractionVolume) {
+        continue;
+      }
+
+      extractionVolume.traverse((node) => {
+        if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshBasicMaterial) {
+          node.material.color.setHex(PLAN_EXTRACTION_COLOR);
+          node.material.opacity = PLAN_EXTRACTION_OPACITY;
+          node.material.needsUpdate = true;
+        }
+        if (node instanceof THREE.LineSegments && node.material instanceof THREE.LineBasicMaterial) {
+          node.material.color.setHex(PLAN_EXTRACTION_COLOR);
+          node.material.opacity = 0.9;
+          node.material.needsUpdate = true;
+        }
+      });
+
+      planExtractionVolumesRef.current.set(item.id, extractionVolume);
+    }
+  }
+
   const handleUpdatePlanAngle = useCallback((planItemId: string, angle: number): void => {
-    const normalized = THREE.MathUtils.clamp(Math.round(angle), 0, 360);
+    const normalized = Number.isFinite(angle)
+      ? THREE.MathUtils.clamp(Math.round(angle), 0, 360)
+      : 0;
     setPlan((prev) =>
       prev.map((item) => (item.id === planItemId ? { ...item, angle: normalized } : item)),
     );
@@ -643,6 +924,15 @@ export function Visualiser() {
 
   const handleDeletePlanItem = useCallback((planItemId: string): void => {
     setPlan((prev) => prev.filter((item) => item.id !== planItemId));
+  }, []);
+
+  const handleUpdatePlanQuantity = useCallback((planItemId: string, quantity: number): void => {
+    const normalized = Number.isFinite(quantity)
+      ? Math.max(0, Math.round(quantity))
+      : 0;
+    setPlan((prev) =>
+      prev.map((item) => (item.id === planItemId ? { ...item, quantity: normalized } : item)),
+    );
   }, []);
 
   const handleRequestRegionEdit = useCallback((key: string): void => {
@@ -753,8 +1043,11 @@ export function Visualiser() {
         onDeleteRegion={handleDeleteRegion}
         onClearSelections={handleClearSelections}
         plan={plan}
+        outcomeByItemId={planStats.outcomeByItemId}
+        grandTotal={planStats.grandTotal}
         onAddRegionToPlan={handleAddRegionToPlan}
         onUpdatePlanAngle={handleUpdatePlanAngle}
+        onUpdatePlanQuantity={handleUpdatePlanQuantity}
         onDeletePlanItem={handleDeletePlanItem}
       />
     </div>

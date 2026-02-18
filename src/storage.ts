@@ -20,6 +20,7 @@ export interface StoredPlanItem {
   id: string;
   regionKey: string;
   angle: number;
+  quantity: number;
 }
 
 interface StoredPlanPayload {
@@ -93,10 +94,12 @@ function toStoredPlanItem(value: unknown): StoredPlanItem | null {
     return null;
   }
 
+  const quantity = isFiniteNumber(item.quantity) ? item.quantity : 0;
   return {
     id: item.id,
     regionKey: item.regionKey,
     angle: Math.min(360, Math.max(0, Math.round(item.angle))),
+    quantity: Math.max(0, Math.round(quantity)),
   };
 }
 

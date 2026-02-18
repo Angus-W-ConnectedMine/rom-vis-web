@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Point } from "./points";
 import { RegionFormModal } from "./regionFormModal";
-import { type PlanItem } from "./OperationPlan";
+import { type PlanGrandTotal, type PlanItem, type PlanOutcomeItem } from "./OperationPlan";
 import { RegionTab } from "./RegionTab";
 import { PlanTab } from "./PlanTab";
 
@@ -36,8 +36,11 @@ interface OverlayProps {
   onDeleteRegion: (key: string) => void;
   onClearSelections: () => void;
   plan: PlanItem[];
+  outcomeByItemId: Record<string, PlanOutcomeItem>;
+  grandTotal: PlanGrandTotal;
   onAddRegionToPlan: (region: RegionMeta) => void;
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
+  onUpdatePlanQuantity: (planItemId: string, quantity: number) => void;
   onDeletePlanItem: (planItemId: string) => void;
 }
 
@@ -66,8 +69,11 @@ export function Overlay(props: OverlayProps) {
     onDeleteRegion,
     onClearSelections,
     plan,
+    outcomeByItemId,
+    grandTotal,
     onAddRegionToPlan,
     onUpdatePlanAngle,
+    onUpdatePlanQuantity,
     onDeletePlanItem,
   } = props;
   const regionItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -146,8 +152,11 @@ export function Overlay(props: OverlayProps) {
           <PlanTab
             regions={regions}
             plan={plan}
+            outcomeByItemId={outcomeByItemId}
+            grandTotal={grandTotal}
             onAddRegionToPlan={onAddRegionToPlan}
             onUpdatePlanAngle={onUpdatePlanAngle}
+            onUpdatePlanQuantity={onUpdatePlanQuantity}
             onDeletePlanItem={onDeletePlanItem}
           />
         )}
