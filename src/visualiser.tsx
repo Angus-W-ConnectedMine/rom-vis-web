@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import {
   addPointClouds,
   fromStoredPrism,
@@ -35,6 +36,7 @@ interface RegionPrism {
   regionId: string;
   prism: THREE.Group;
   snapshot: PrismSnapshot;
+  label: CSS2DObject;
 }
 
 const REGION_DEFAULT_COLOR = 0x22d3ee;
@@ -45,6 +47,7 @@ const PLAN_ARROW_LENGTH = 12;
 const PLAN_ARROW_HEAD_LENGTH = 4;
 const PLAN_ARROW_HEAD_WIDTH = 4;
 const PLAN_ARROW_EDGE_GAP = 4;
+const REGION_LABEL_Z_OFFSET = 1.5;
 
 function createScene(): THREE.Scene {
   const scene = new THREE.Scene();
@@ -65,6 +68,38 @@ function createRenderer(container: HTMLElement): THREE.WebGLRenderer {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
   return renderer;
+}
+
+function createLabelRenderer(container: HTMLElement): CSS2DRenderer {
+  const renderer = new CSS2DRenderer();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.domElement.className = "visualiser-label-layer";
+  renderer.domElement.style.position = "absolute";
+  renderer.domElement.style.left = "0";
+  renderer.domElement.style.top = "0";
+  renderer.domElement.style.pointerEvents = "none";
+  container.appendChild(renderer.domElement);
+  return renderer;
+}
+
+function createRegionLabel(regionId: string): CSS2DObject {
+  const element = document.createElement("div");
+  element.className = "region-label";
+  element.textContent = regionId;
+  const label = new CSS2DObject(element);
+  label.center.set(0.5, 0);
+  return label;
+}
+
+function updateRegionLabel(label: CSS2DObject, regionId: string): void {
+  if (label.element instanceof HTMLElement) {
+    label.element.textContent = regionId;
+  }
+}
+
+function getRegionLabelPosition(snapshot: PrismSnapshot): THREE.Vector3 {
+  const center = getRegionCenter(snapshot);
+  return new THREE.Vector3(center.x, center.y, snapshot.maxZ + REGION_LABEL_Z_OFFSET);
 }
 
 function addLights(scene: THREE.Scene): void {
@@ -195,6 +230,7 @@ export function Visualiser() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const labelRendererRef = useRef<CSS2DRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const pointsRef = useRef<Point[]>([]);
   const pointOffsetRef = useRef<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
@@ -286,6 +322,7 @@ export function Visualiser() {
     const scene = createScene();
     const camera = createCamera(viewport.clientWidth, viewport.clientHeight);
     const renderer = createRenderer(viewport);
+    const labelRenderer = createLabelRenderer(viewport);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
@@ -295,6 +332,7 @@ export function Visualiser() {
     sceneRef.current = scene;
     cameraRef.current = camera;
     rendererRef.current = renderer;
+    labelRendererRef.current = labelRenderer;
     controlsRef.current = controls;
     setInteractionElement(renderer.domElement);
     regionPrismsRef.current = [];
@@ -309,6 +347,7 @@ export function Visualiser() {
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
+      labelRenderer.setSize(width, height);
     };
 
     const animate = (): void => {
@@ -317,6 +356,7 @@ export function Visualiser() {
       }
       controls.update();
       renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
       frameId = requestAnimationFrame(animate);
     };
 
@@ -401,12 +441,15 @@ export function Visualiser() {
 
             const key = storedPrism.key;
             const regionId = storedPrism.regionId;
+            const label = createRegionLabel(regionId);
+            label.position.copy(getRegionLabelPosition(snapshot));
+            scene.add(label);
             const selectedPoints = getPointsInPrism(renderPoints, snapshot);
             prism.userData.regionKey = key;
             prism.traverse((node) => {
               node.userData.regionKey = key;
             });
-            restoredRegionPrisms.push({ key, regionId, prism, snapshot });
+            restoredRegionPrisms.push({ key, regionId, prism, snapshot, label });
             restoredRegions.push(
               getRegionMetaFromSelection(key, regionId, snapshot, selectedPoints, pointOffset),
             );
@@ -440,6 +483,7 @@ export function Visualiser() {
 
       for (const regionPrism of regionPrismsRef.current) {
         scene.remove(regionPrism.prism);
+        scene.remove(regionPrism.label);
       }
       regionPrismsRef.current = [];
       for (const arrow of planArrowsRef.current.values()) {
@@ -448,11 +492,13 @@ export function Visualiser() {
       planArrowsRef.current.clear();
       controls.dispose();
       renderer.dispose();
+      labelRenderer.domElement.remove();
       renderer.domElement.remove();
 
       sceneRef.current = null;
       cameraRef.current = null;
       rendererRef.current = null;
+      labelRendererRef.current = null;
       controlsRef.current = null;
       pointsRef.current = [];
       pointOffsetRef.current = { x: 0, y: 0, z: 0 };
@@ -520,12 +566,15 @@ export function Visualiser() {
     const pointOffset = pointOffsetRef.current;
     const key = crypto.randomUUID();
     const suggestedId = `region-${Math.floor(Math.random() * 1000)}`;
+    const label = createRegionLabel(suggestedId);
+    label.position.copy(getRegionLabelPosition(prismSnapshot));
+    scene.add(label);
 
     prism.userData.regionKey = key;
     prism.traverse((node) => {
       node.userData.regionKey = key;
     });
-    regionPrismsRef.current.push({ key, regionId: suggestedId, prism, snapshot: prismSnapshot });
+    regionPrismsRef.current.push({ key, regionId: suggestedId, prism, snapshot: prismSnapshot, label });
     persistRegionPrisms();
 
     setRegions((prev) => [
@@ -604,6 +653,7 @@ export function Visualiser() {
     for (const regionPrism of regionPrismsRef.current) {
       if (regionPrism.key === key) {
         regionPrism.regionId = regionId;
+        updateRegionLabel(regionPrism.label, regionId);
         break;
       }
     }
@@ -666,6 +716,7 @@ export function Visualiser() {
     for (const regionPrism of regionPrismsRef.current) {
       if (regionPrism.key === key) {
         scene.remove(regionPrism.prism);
+        scene.remove(regionPrism.label);
       } else {
         nextRegionPrisms.push(regionPrism);
       }

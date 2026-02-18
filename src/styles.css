@@ -42,6 +42,21 @@ body {
   height: 100%;
 }
 
+.visualiser-label-layer {
+  z-index: 2;
+}
+
+.region-label {
+  font: 600 12px/1.2 ui-sans-serif, system-ui, sans-serif;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 6px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  user-select: none;
+}
+
 .selection-rect {
   position: absolute;
   pointer-events: none;
@@ -63,6 +78,7 @@ body {
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden;
+  z-index: 10;
 }
 
 .overlay-panel,
