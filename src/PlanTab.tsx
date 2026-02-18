@@ -2,7 +2,6 @@ import OperationalPlan, { type PlanItem } from "./OperationPlan";
 import type { RegionMeta } from "./overlay";
 
 interface PlanTabProps {
-  selectedRegions: RegionMeta[];
   regions: RegionMeta[];
   plan: PlanItem[];
   onAddRegionToPlan: (region: RegionMeta) => void;
@@ -10,7 +9,6 @@ interface PlanTabProps {
 }
 
 export function PlanTab({
-  selectedRegions,
   regions,
   plan,
   onAddRegionToPlan,
@@ -19,8 +17,7 @@ export function PlanTab({
   return (
     <div className="overlay-tab-content" role="tabpanel" aria-labelledby="overlay-tab-plan">
       <OperationalPlan
-        addableRegions={selectedRegions}
-        allRegions={regions}
+        regions={regions}
         plan={plan}
         onAddRegionToPlan={onAddRegionToPlan}
         onUpdatePlanAngle={onUpdatePlanAngle}

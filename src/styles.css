@@ -54,10 +54,15 @@ body {
   right: 12px;
   top: 12px;
   width: 320px;
+  max-height: calc(100vh - 24px);
   padding: 12px;
   border-radius: 8px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .overlay-panel,
@@ -95,8 +100,15 @@ body {
 }
 
 .overlay-tab-content {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   gap: 10px;
+  min-height: 0;
+}
+
+.overlay-tab-content > .card {
+  min-height: 0;
 }
 
 .overlay-summary-card h4 {
@@ -273,6 +285,30 @@ button:hover:not(:disabled) {
   background: rgba(2, 6, 23, 0.35);
 }
 
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.plan-card h4,
+.plan-card p {
+  margin-top: 0;
+}
+
+.plan-add-region-row {
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.plan-list-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .display-grid {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -285,12 +321,8 @@ button:hover:not(:disabled) {
 }
 
 .plan-list {
-  margin-top: 8px;
   display: grid;
   gap: 8px;
-  max-height: min(36vh, 280px);
-  overflow-y: auto;
-  padding-right: 4px;
 }
 
 .plan-item {
@@ -302,9 +334,21 @@ button:hover:not(:disabled) {
 
 .plan-item-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   margin-bottom: 6px;
+}
+
+.plan-item-row strong {
+  min-width: 0;
+  flex: 1 1 180px;
+  overflow-wrap: anywhere;
+}
+
+.plan-item-row span {
+  flex: 0 0 auto;
 }
 
 .plan-item input[type="range"] {

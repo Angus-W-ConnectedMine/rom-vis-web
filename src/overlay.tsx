@@ -142,7 +142,6 @@ export function Overlay(props: OverlayProps) {
           />
         ) : (
           <PlanTab
-            selectedRegions={selectedRegions}
             regions={regions}
             plan={plan}
             onAddRegionToPlan={onAddRegionToPlan}
