@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { getPoints, type Point } from "./points";
+import { DB_PATH } from "./db";
 
 const MIN_W = 0.5;
 const MAX_W = 10.0;
@@ -38,11 +39,67 @@ function generateWValues(count: number): Float64Array {
   return values;
 }
 
+function addHigherValueRegions(points: Point[], values: Float64Array): void {
+  const NUM_REGIONS = 12;
+  const VALUE_CHANGE = 2;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+
+  for (const point of points) {
+    if (!point) continue;
+
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.z < minZ) minZ = point.z;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+    if (point.z > maxZ) maxZ = point.z;
+  }
+
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  const spanZ = maxZ - minZ;
+  const maxSpan = Math.max(spanX, spanY, spanZ);
+  const minRadius = maxSpan * 0.03;
+  const maxRadius = maxSpan * 0.08;
+
+  for (let regionIndex = 0; regionIndex < NUM_REGIONS; regionIndex += 1) {
+    const center = points[Math.floor(Math.random() * points.length)];
+    if (!center) continue;
+
+    const radius = rand(minRadius, maxRadius);
+    const radiusSq = radius * radius;
+
+    for (let i = 0; i < points.length; i += 1) {
+      const point = points[i];
+      if (!point) continue;
+
+      const dx = point.x - center.x;
+      const dy = point.y - center.y;
+      const dz = point.z - center.z;
+      const distanceSq = dx * dx + dy * dy + dz * dz;
+
+      if (distanceSq <= radiusSq) {
+        const currentValue = values[i];
+        if (currentValue === undefined) continue;
+
+        values[i] = currentValue + VALUE_CHANGE;
+      }
+    }
+  }
+}
+
 export async function generateTestData() {
   console.log("Generating test data...");
   const points = await getPoints();
   const wValues = generateWValues(points.length);
-  const db = new Database(Bun.env.DB_PATH);
+  addHigherValueRegions(points, wValues);
+  const db = new Database(DB_PATH);
   const tableName = "MockData";
   db.run(`DROP TABLE IF EXISTS ${tableName}`);
 

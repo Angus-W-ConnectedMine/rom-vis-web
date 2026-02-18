@@ -1,0 +1,1 @@
+export const DB_PATH = Bun.env.DB_PATH || "./data/data.db";

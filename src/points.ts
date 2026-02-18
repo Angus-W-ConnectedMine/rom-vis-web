@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { DB_PATH } from "./db";
 
 export interface Point {
   x: number;
@@ -7,7 +8,6 @@ export interface Point {
   w: number;
 }
 
-const DB_PATH = Bun.env.DB_PATH || "./data/data.db";
 const USE_PROD = Bun.env.USE_PROD === "true" ? true : false;
 
 if (!DB_PATH) {
