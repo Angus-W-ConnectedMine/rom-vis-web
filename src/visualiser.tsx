@@ -4,12 +4,9 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import {
   addPointClouds,
-  fromStoredPrism,
   getPointsInPrism,
   getPrismSnapshot,
-  restorePrism,
   addSelectionPrism,
-  fitCameraToPointCloud,
   getPointsInScreenSelection,
   toStoredPrism,
   type PrismSnapshot,
@@ -24,65 +21,18 @@ import type { PlanGrandTotal, PlanItem, PlanOutcomeItem } from "./OperationPlan"
 import type { Point } from "./points";
 import {
   loadStoredPlan,
-  loadStoredPrisms,
   saveStoredPlan,
   saveStoredPrisms,
 } from "./storage";
+import { computePlanStats } from "./planStats";
+import { usePlanExtractionVolumes } from "./usePlanExtractionVolumes";
 import { useSelectionController } from "./useSelectionController";
-
-interface RegionPrism {
-  key: string;
-  regionId: string;
-  prism: THREE.Group;
-  snapshot: PrismSnapshot;
-  label: CSS2DObject;
-}
-
-interface PlanStats {
-  outcomeByItemId: Record<string, PlanOutcomeItem>;
-  grandTotal: PlanGrandTotal;
-  extractedPointsByItemId: Record<string, Point[]>;
-}
+import { useVisualiserScene, type RegionPrism } from "./useVisualiserScene";
 
 const REGION_DEFAULT_COLOR = 0x22d3ee;
 const REGION_SELECTED_COLOR = 0xf59e0b;
 
-const PLAN_EXTRACTION_COLOR = 0xff4d00;
-const PLAN_EXTRACTION_OPACITY = 0.3;
 const REGION_LABEL_Z_OFFSET = 1.5;
-
-function createScene(): THREE.Scene {
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0f172a);
-  return scene;
-}
-
-function createCamera(width: number, height: number): THREE.PerspectiveCamera {
-  const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-  camera.position.set(0, 6, 24);
-  camera.up.set(0, 0, 1);
-  return camera;
-}
-
-function createRenderer(container: HTMLElement): THREE.WebGLRenderer {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  container.appendChild(renderer.domElement);
-  return renderer;
-}
-
-function createLabelRenderer(container: HTMLElement): CSS2DRenderer {
-  const renderer = new CSS2DRenderer();
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.domElement.className = "visualiser-label-layer";
-  renderer.domElement.style.position = "absolute";
-  renderer.domElement.style.left = "0";
-  renderer.domElement.style.top = "0";
-  renderer.domElement.style.pointerEvents = "none";
-  container.appendChild(renderer.domElement);
-  return renderer;
-}
 
 function createRegionLabel(regionId: string): CSS2DObject {
   const element = document.createElement("div");
@@ -102,21 +52,6 @@ function updateRegionLabel(label: CSS2DObject, regionId: string): void {
 function getRegionLabelPosition(snapshot: PrismSnapshot): THREE.Vector3 {
   const center = getRegionCenter(snapshot);
   return new THREE.Vector3(center.x, center.y, snapshot.maxZ + REGION_LABEL_Z_OFFSET);
-}
-
-function addLights(scene: THREE.Scene): void {
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-  const directional = new THREE.DirectionalLight(0xffffff, 1.2);
-  directional.position.set(6, 8, 10);
-  scene.add(directional);
-}
-
-async function getPoints(): Promise<Point[]> {
-  const response = await fetch("/points");
-  if (!response.ok) {
-    throw new Error(`Failed to load points: ${response.status}`);
-  }
-  return (await response.json()) as Point[];
 }
 
 function getRegionStats(points: Point[]): { min: Point; max: Point; avgW: number } {
@@ -146,29 +81,6 @@ function getRegionStats(points: Point[]): { min: Point; max: Point; avgW: number
     min: { x: minX, y: minY, z: minZ, w: minW },
     max: { x: maxX, y: maxY, z: maxZ, w: maxW },
     avgW: points.length > 0 ? sumW / points.length : 0,
-  };
-}
-
-function getPointCloudOffset(points: Point[]): { x: number; y: number; z: number } {
-  if (points.length === 0) {
-    return { x: 0, y: 0, z: 0 };
-  }
-
-  let sumX = 0;
-  let sumY = 0;
-  let sumZ = 0;
-
-  for (const point of points) {
-    sumX += point.x;
-    sumY += point.y;
-    sumZ += point.z;
-  }
-
-  const invCount = 1 / points.length;
-  return {
-    x: sumX * invCount,
-    y: sumY * invCount,
-    z: sumZ * invCount,
   };
 }
 
@@ -227,266 +139,6 @@ function getRegionMetaFromSelection(
   };
 }
 
-function getDepthFromRegionEdge(
-  point: Point,
-  center: THREE.Vector3,
-  outward: THREE.Vector3,
-  maxProjection: number,
-): number {
-  const projection =
-    (point.x - center.x) * outward.x +
-    (point.y - center.y) * outward.y;
-  return maxProjection - projection;
-}
-
-function clipPolygonByHalfPlane(
-  polygon: Array<{ x: number; y: number }>,
-  outward: THREE.Vector3,
-  threshold: number,
-): Array<{ x: number; y: number }> {
-  if (polygon.length < 3) {
-    return [];
-  }
-
-  const inside = (point: { x: number; y: number }): boolean =>
-    (point.x * outward.x + point.y * outward.y) >= threshold;
-
-  const intersect = (
-    start: { x: number; y: number },
-    end: { x: number; y: number },
-  ): { x: number; y: number } | null => {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const denominator = dx * outward.x + dy * outward.y;
-    if (Math.abs(denominator) < 1e-8) {
-      return null;
-    }
-    const t = (threshold - (start.x * outward.x + start.y * outward.y)) / denominator;
-    if (t < 0 || t > 1) {
-      return null;
-    }
-    return {
-      x: start.x + t * dx,
-      y: start.y + t * dy,
-    };
-  };
-
-  const result: Array<{ x: number; y: number }> = [];
-
-  for (let i = 0; i < polygon.length; i += 1) {
-    const current = polygon[i] as { x: number; y: number };
-    const next = polygon[(i + 1) % polygon.length] as { x: number; y: number };
-    const currentInside = inside(current);
-    const nextInside = inside(next);
-
-    if (currentInside && nextInside) {
-      result.push(next);
-      continue;
-    }
-
-    if (currentInside && !nextInside) {
-      const crossing = intersect(current, next);
-      if (crossing) {
-        result.push(crossing);
-      }
-      continue;
-    }
-
-    if (!currentInside && nextInside) {
-      const crossing = intersect(current, next);
-      if (crossing) {
-        result.push(crossing);
-      }
-      result.push(next);
-    }
-  }
-
-  return result;
-}
-
-function createExtractionSnapshot(
-  regionSnapshot: PrismSnapshot,
-  itemAngle: number,
-  takenPoints: Point[],
-): PrismSnapshot | null {
-  if (takenPoints.length === 0 || regionSnapshot.footprint.length < 3) {
-    return null;
-  }
-
-  const angleRadians = THREE.MathUtils.degToRad(itemAngle);
-  const outward = new THREE.Vector3(Math.cos(angleRadians), Math.sin(angleRadians), 0);
-
-  let threshold = Infinity;
-  for (const point of takenPoints) {
-    const projection = point.x * outward.x + point.y * outward.y;
-    if (projection < threshold) {
-      threshold = projection;
-    }
-  }
-
-  if (!Number.isFinite(threshold)) {
-    return null;
-  }
-
-  const clippedFootprint = clipPolygonByHalfPlane(regionSnapshot.footprint, outward, threshold);
-  if (clippedFootprint.length < 3) {
-    return null;
-  }
-
-  return {
-    minZ: regionSnapshot.minZ,
-    maxZ: regionSnapshot.maxZ,
-    footprint: clippedFootprint,
-  };
-}
-
-function sumW(points: Point[]): number {
-  let total = 0;
-  for (const point of points) {
-    total += point.w;
-  }
-  return total;
-}
-
-function getEmptyGrandTotal(): PlanGrandTotal {
-  return {
-    extractedPointCount: 0,
-    totalW: 0,
-    averageW: 0,
-  };
-}
-
-function computePlanStats(
-  regions: RegionMeta[],
-  plan: PlanItem[],
-  regionPrisms: RegionPrism[],
-  points: Point[],
-): PlanStats {
-  if (plan.length === 0 || regions.length === 0 || regionPrisms.length === 0 || points.length === 0) {
-    return {
-      outcomeByItemId: {},
-      grandTotal: getEmptyGrandTotal(),
-      extractedPointsByItemId: {},
-    };
-  }
-
-  const regionByKey = new Map(regions.map((region) => [region.key, region]));
-  const prismByKey = new Map(regionPrisms.map((regionPrism) => [regionPrism.key, regionPrism]));
-  const itemsByRegionKey = new Map<string, PlanItem[]>();
-
-  for (const item of plan) {
-    const list = itemsByRegionKey.get(item.regionKey) ?? [];
-    list.push(item);
-    itemsByRegionKey.set(item.regionKey, list);
-  }
-
-  const outcomeByItemId: Record<string, PlanOutcomeItem> = {};
-  const extractedPointsByItemId: Record<string, Point[]> = {};
-  let grandExtractedPointCount = 0;
-  let grandTotalW = 0;
-
-  for (const item of plan) {
-    const region = regionByKey.get(item.regionKey);
-    if (!region) {
-      continue;
-    }
-
-    const regionTotalW = region.avgW * region.pointCount;
-    outcomeByItemId[item.id] = {
-      planItemId: item.id,
-      regionId: region.regionId,
-      regionPointCount: region.pointCount,
-      regionTotalW,
-      regionAverageW: region.avgW,
-      extractedPointCount: 0,
-      extractedTotalW: 0,
-      extractedAverageW: 0,
-    };
-    extractedPointsByItemId[item.id] = [];
-  }
-
-  for (const [regionKey, items] of itemsByRegionKey) {
-    const region = regionByKey.get(regionKey);
-    const regionPrism = prismByKey.get(regionKey);
-    if (!region || !regionPrism) {
-      continue;
-    }
-
-    const regionPoints = getPointsInPrism(points, regionPrism.snapshot);
-    const regionPointCount = regionPoints.length;
-    const regionTotalW = sumW(regionPoints);
-    const regionAverageW = regionPointCount > 0 ? regionTotalW / regionPointCount : 0;
-    let remaining = regionPoints;
-
-    const center = getRegionCenter(regionPrism.snapshot);
-
-    for (const item of items) {
-      const quantity = Math.max(0, Math.round(item.quantity));
-      if (quantity === 0 || remaining.length === 0) {
-        outcomeByItemId[item.id] = {
-          planItemId: item.id,
-          regionId: region.regionId,
-          regionPointCount,
-          regionTotalW,
-          regionAverageW,
-          extractedPointCount: 0,
-          extractedTotalW: 0,
-          extractedAverageW: 0,
-        };
-        extractedPointsByItemId[item.id] = [];
-        continue;
-      }
-
-      const angleRadians = THREE.MathUtils.degToRad(item.angle);
-      const outward = new THREE.Vector3(Math.cos(angleRadians), Math.sin(angleRadians), 0);
-
-      let maxProjection = -Infinity;
-      for (const point of remaining) {
-        const projection =
-          (point.x - center.x) * outward.x +
-          (point.y - center.y) * outward.y;
-        if (projection > maxProjection) {
-          maxProjection = projection;
-        }
-      }
-
-      remaining = [...remaining]
-        .sort((a, b) =>
-          getDepthFromRegionEdge(a, center, outward, maxProjection) -
-          getDepthFromRegionEdge(b, center, outward, maxProjection),
-        );
-
-      const takeCount = Math.min(quantity, remaining.length);
-      const takenPoints = remaining.slice(0, takeCount);
-      const extractedTotalW = sumW(takenPoints);
-      const extractedAverageW = takeCount > 0 ? extractedTotalW / takeCount : 0;
-      grandExtractedPointCount += takeCount;
-      grandTotalW += extractedTotalW;
-      outcomeByItemId[item.id] = {
-        planItemId: item.id,
-        regionId: region.regionId,
-        regionPointCount,
-        regionTotalW,
-        regionAverageW,
-        extractedPointCount: takeCount,
-        extractedTotalW,
-        extractedAverageW,
-      };
-      extractedPointsByItemId[item.id] = takenPoints;
-      remaining = remaining.slice(takeCount);
-    }
-  }
-
-  return {
-    outcomeByItemId,
-    grandTotal: {
-      extractedPointCount: grandExtractedPointCount,
-      totalW: grandTotalW,
-      averageW: grandExtractedPointCount > 0 ? grandTotalW / grandExtractedPointCount : 0,
-    },
-    extractedPointsByItemId,
-  };
-}
 
 export function Visualiser() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -526,205 +178,30 @@ export function Visualiser() {
     );
   }, []);
 
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
-    let disposed = false;
-    let frameId = 0;
-
-    const scene = createScene();
-    const camera = createCamera(viewport.clientWidth, viewport.clientHeight);
-    const renderer = createRenderer(viewport);
-    const labelRenderer = createLabelRenderer(viewport);
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
-    controls.update();
-    addLights(scene);
-
-    sceneRef.current = scene;
-    cameraRef.current = camera;
-    rendererRef.current = renderer;
-    labelRendererRef.current = labelRenderer;
-    controlsRef.current = controls;
-    setInteractionElement(renderer.domElement);
-    regionPrismsRef.current = [];
-    planExtractionVolumesRef.current.clear();
-
-    const resize = (): void => {
-      if (disposed) {
-        return;
-      }
-      const width = viewport.clientWidth;
-      const height = viewport.clientHeight;
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
-      labelRenderer.setSize(width, height);
-    };
-
-    const animate = (): void => {
-      if (disposed) {
-        return;
-      }
-      controls.update();
-      renderer.render(scene, camera);
-      labelRenderer.render(scene, camera);
-      frameId = requestAnimationFrame(animate);
-    };
-
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-
-    const findRegionKeyFromObject = (object: THREE.Object3D): string | null => {
-      let current: THREE.Object3D | null = object;
-      while (current) {
-        const key = current.userData.regionKey;
-        if (typeof key === "string") {
-          return key;
-        }
-        current = current.parent;
-      }
-      return null;
-    };
-
-    const onSceneClick = (event: MouseEvent): void => {
-      if (editingRegionKeyRef.current !== null || selectionRectRef.current) {
-        return;
-      }
-
-      const rect = renderer.domElement.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) {
-        return;
-      }
-
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(pointer, camera);
-
-      const regionObjects = regionPrismsRef.current.map((regionPrism) => regionPrism.prism);
-      const intersections = raycaster.intersectObjects(regionObjects, true);
-      if (intersections.length === 0) {
-        return;
-      }
-
-      const key = findRegionKeyFromObject(intersections[0]!.object);
-      if (key === null) {
-        return;
-      }
-
-      setSelectedRegionKeys((prev) =>
-        prev.includes(key) ? prev.filter((value) => value !== key) : [...prev, key],
-      );
-    };
-
-    window.addEventListener("resize", resize);
-    renderer.domElement.addEventListener("click", onSceneClick);
-
-    void (async () => {
-      try {
-        const sourcePoints = await getPoints();
-        if (disposed) {
-          return;
-        }
-
-        const pointOffset = getPointCloudOffset(sourcePoints);
-        const renderPoints = sourcePoints.map((point) => ({
-          x: point.x - pointOffset.x,
-          y: point.y - pointOffset.y,
-          z: point.z - pointOffset.z,
-          w: point.w,
-        }));
-
-        pointOffsetRef.current = pointOffset;
-        pointsRef.current = renderPoints;
-        addPointClouds(scene, renderPoints);
-
-        const storedPrisms = loadStoredPrisms();
-        if (storedPrisms.length > 0) {
-          const restoredRegionPrisms: RegionPrism[] = [];
-          const restoredRegions: RegionMeta[] = [];
-
-          for (const storedPrism of storedPrisms) {
-            const snapshot = fromStoredPrism(storedPrism);
-            const prism = restorePrism(scene, snapshot);
-            if (!prism) {
-              continue;
-            }
-
-            const key = storedPrism.key;
-            const regionId = storedPrism.regionId;
-            const label = createRegionLabel(regionId);
-            label.position.copy(getRegionLabelPosition(snapshot));
-            scene.add(label);
-            const selectedPoints = getPointsInPrism(renderPoints, snapshot);
-            prism.userData.regionKey = key;
-            prism.traverse((node) => {
-              node.userData.regionKey = key;
-            });
-            restoredRegionPrisms.push({ key, regionId, prism, snapshot, label });
-            restoredRegions.push(
-              getRegionMetaFromSelection(key, regionId, snapshot, selectedPoints, pointOffset),
-            );
-          }
-
-          regionPrismsRef.current = restoredRegionPrisms;
-          setRegions(restoredRegions);
-        }
-        setRegionsHydrated(true);
-
-        fitCameraToPointCloud(camera, controls, renderPoints);
-        setStatus(
-          "Shift + drag to select",
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setStatus(`Failed to initialize scene: ${message}`);
-      } finally {
-        if (!disposed) {
-          animate();
-        }
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      cancelAnimationFrame(frameId);
-
-      window.removeEventListener("resize", resize);
-      renderer.domElement.removeEventListener("click", onSceneClick);
-
-      for (const regionPrism of regionPrismsRef.current) {
-        scene.remove(regionPrism.prism);
-        scene.remove(regionPrism.label);
-      }
-      regionPrismsRef.current = [];
-      for (const volume of planExtractionVolumesRef.current.values()) {
-        scene.remove(volume);
-      }
-      planExtractionVolumesRef.current.clear();
-      controls.dispose();
-      renderer.dispose();
-      labelRenderer.domElement.remove();
-      renderer.domElement.remove();
-
-      sceneRef.current = null;
-      cameraRef.current = null;
-      rendererRef.current = null;
-      labelRendererRef.current = null;
-      controlsRef.current = null;
-      pointsRef.current = [];
-      pointOffsetRef.current = { x: 0, y: 0, z: 0 };
-      setSelectedRegionKeys([]);
-      setPlan([]);
-      setRegionsHydrated(false);
-      setEditingRegionKey(null);
-      setInteractionElement(null);
-    };
-  }, []);
+  useVisualiserScene({
+    viewportRef,
+    selectionRectRef,
+    editingRegionKeyRef,
+    sceneRef,
+    cameraRef,
+    rendererRef,
+    labelRendererRef,
+    controlsRef,
+    pointsRef,
+    pointOffsetRef,
+    regionPrismsRef,
+    planExtractionVolumesRef,
+    setInteractionElement,
+    setRegions,
+    setRegionsHydrated,
+    setStatus,
+    setSelectedRegionKeys,
+    setPlan,
+    setEditingRegionKey,
+    createRegionLabel,
+    getRegionLabelPosition,
+    getRegionMetaFromSelection,
+  });
 
   // Disable controls while selecting to prevent conflicts
   const onCurrentlySelectingChange = useCallback((currentlySelecting: boolean): void => {
@@ -837,9 +314,13 @@ export function Visualiser() {
     };
   }, [plan, regionsHydrated]);
 
-  useEffect(() => {
-    syncPlanExtractionVolumes(plan, planStats.extractedPointsByItemId);
-  }, [plan, planStats.extractedPointsByItemId]);
+  usePlanExtractionVolumes({
+    sceneRef,
+    regionPrismsRef,
+    planExtractionVolumesRef,
+    plan,
+    extractedPointsByItemId: planStats.extractedPointsByItemId,
+  });
 
   const handleAddRegionToPlan = useCallback((region: RegionMeta): void => {
     const planItemId = crypto.randomUUID();
@@ -857,61 +338,6 @@ export function Visualiser() {
       return next;
     });
   }, []);
-
-  function syncPlanExtractionVolumes(items: PlanItem[], extractedPointsByItemId: Record<string, Point[]>): void {
-    const scene = sceneRef.current;
-    if (!scene) {
-      return;
-    }
-
-    const prismByKey = new Map(regionPrismsRef.current.map((regionPrism) => [regionPrism.key, regionPrism]));
-
-    for (const volume of planExtractionVolumesRef.current.values()) {
-      scene.remove(volume);
-    }
-    planExtractionVolumesRef.current.clear();
-
-    for (const item of items) {
-      const extractedPoints = extractedPointsByItemId[item.id] ?? [];
-      if (extractedPoints.length === 0) {
-        continue;
-      }
-
-      const regionPrism = prismByKey.get(item.regionKey);
-      if (!regionPrism) {
-        continue;
-      }
-
-      const extractionSnapshot = createExtractionSnapshot(
-        regionPrism.snapshot,
-        item.angle,
-        extractedPoints,
-      );
-      if (!extractionSnapshot) {
-        continue;
-      }
-
-      const extractionVolume = restorePrism(scene, extractionSnapshot);
-      if (!extractionVolume) {
-        continue;
-      }
-
-      extractionVolume.traverse((node) => {
-        if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshBasicMaterial) {
-          node.material.color.setHex(PLAN_EXTRACTION_COLOR);
-          node.material.opacity = PLAN_EXTRACTION_OPACITY;
-          node.material.needsUpdate = true;
-        }
-        if (node instanceof THREE.LineSegments && node.material instanceof THREE.LineBasicMaterial) {
-          node.material.color.setHex(PLAN_EXTRACTION_COLOR);
-          node.material.opacity = 0.9;
-          node.material.needsUpdate = true;
-        }
-      });
-
-      planExtractionVolumesRef.current.set(item.id, extractionVolume);
-    }
-  }
 
   const handleUpdatePlanAngle = useCallback((planItemId: string, angle: number): void => {
     const normalized = Number.isFinite(angle)
