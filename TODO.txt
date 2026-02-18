@@ -1,0 +1,13 @@
+Components
+- MapView
+- ControlSurface
+- RegionManager
+- PlanManager
+- RecipeCalculator
+
+useArray?
+
+Top level state
+- Points
+- Regions (should "is selected" be a property? or a list?)
+- PlanItems
