@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getDistanceToPrismEdge, getPointsInPrism, getRegionCenter } from "./geometry";
 import type { PlanItem } from "./OperationPlan";
 import type { RegionMeta } from "./overlay";
 import type { Point } from "./points";
@@ -44,6 +45,7 @@ interface GeneratePlanResult {
   completed: boolean;
 }
 
+const ALL_ANGLES = Array.from({ length: 360 }, (_, index) => index);
 function clampAngle(angle: number): number {
   if (!Number.isFinite(angle)) {
     return 0;
@@ -58,6 +60,40 @@ function clampQuantity(quantity: number, max: number): number {
     return 0;
   }
   return THREE.MathUtils.clamp(Math.round(quantity), 0, max);
+}
+
+function getCircularDistance(a: number, b: number): number {
+  const diff = Math.abs(a - b);
+  return Math.min(diff, 360 - diff);
+}
+
+function normalizeAllowedAngle(angle: number, allowedAngles: number[]): number {
+  const normalized = clampAngle(angle);
+  if (allowedAngles.length === 0) {
+    return normalized;
+  }
+
+  if (allowedAngles.includes(normalized)) {
+    return normalized;
+  }
+
+  let best = allowedAngles[0] ?? normalized;
+  let bestDistance = getCircularDistance(normalized, best);
+  for (const candidate of allowedAngles) {
+    const distance = getCircularDistance(normalized, candidate);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function pickRandomAllowedAngle(allowedAngles: number[]): number {
+  if (allowedAngles.length === 0) {
+    return Math.floor(Math.random() * 360);
+  }
+  return allowedAngles[Math.floor(Math.random() * allowedAngles.length)] ?? 0;
 }
 
 function cloneGenome(genome: PlanGenome): PlanGenome {
@@ -118,8 +154,159 @@ function scoreStats(stats: PlanStats, desiredTotalPoints: number, desiredGrade: 
   return score;
 }
 
-function createRandomGenome(regions: RegionMeta[], desiredTotalPoints: number): PlanGenome {
-  const angles = regions.map(() => Math.floor(Math.random() * 360));
+function cross2D(o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+function getConvexHullXY(points: Point[]): Array<{ x: number; y: number }> {
+  const sorted = points
+    .map((point) => ({ x: point.x, y: point.y }))
+    .sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+
+  if (sorted.length <= 1) {
+    return sorted;
+  }
+
+  const unique: Array<{ x: number; y: number }> = [];
+  for (const point of sorted) {
+    const last = unique[unique.length - 1];
+    if (!last || last.x !== point.x || last.y !== point.y) {
+      unique.push(point);
+    }
+  }
+
+  if (unique.length <= 1) {
+    return unique;
+  }
+
+  const lower: Array<{ x: number; y: number }> = [];
+  for (const point of unique) {
+    while (lower.length >= 2 && cross2D(lower[lower.length - 2]!, lower[lower.length - 1]!, point) <= 0) {
+      lower.pop();
+    }
+    lower.push(point);
+  }
+
+  const upper: Array<{ x: number; y: number }> = [];
+  for (let i = unique.length - 1; i >= 0; i -= 1) {
+    const point = unique[i]!;
+    while (upper.length >= 2 && cross2D(upper[upper.length - 2]!, upper[upper.length - 1]!, point) <= 0) {
+      upper.pop();
+    }
+    upper.push(point);
+  }
+
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+function isPointOnSegment(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): boolean {
+  const epsilon = 1e-9;
+  const cross = (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+  if (Math.abs(cross) > epsilon) {
+    return false;
+  }
+
+  const dot = (px - ax) * (bx - ax) + (py - ay) * (by - ay);
+  if (dot < -epsilon) {
+    return false;
+  }
+
+  const lengthSquared = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+  return dot <= lengthSquared + epsilon;
+}
+
+function isPointInsideOrOnPolygon(x: number, y: number, polygon: Array<{ x: number; y: number }>): boolean {
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i]!;
+    const b = polygon[j]!;
+
+    if (isPointOnSegment(x, y, a.x, a.y, b.x, b.y)) {
+      return true;
+    }
+
+    const intersects = ((a.y > y) !== (b.y > y)) &&
+      (x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x);
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function getAllowedAnglesForRegion(
+  prism: PlanRegionPrism | undefined,
+  regionPoints: Point[],
+): number[] {
+  if (!prism || regionPoints.length < 3) {
+    return ALL_ANGLES;
+  }
+
+  const hull = getConvexHullXY(regionPoints);
+  if (hull.length < 3) {
+    return ALL_ANGLES;
+  }
+
+  const center = getRegionCenter(prism.snapshot);
+  const allowedAngles: number[] = [];
+
+  for (let angle = 0; angle < 360; angle += 1) {
+    const radians = THREE.MathUtils.degToRad(angle);
+    const outward = new THREE.Vector3(Math.cos(radians), Math.sin(radians), 0);
+    const opposite = outward.clone().multiplyScalar(-1);
+
+    const outwardDistance = getDistanceToPrismEdge(prism.snapshot, center, outward);
+    const oppositeDistance = getDistanceToPrismEdge(prism.snapshot, center, opposite);
+
+    const outwardX = center.x + outward.x * outwardDistance;
+    const outwardY = center.y + outward.y * outwardDistance;
+    const oppositeX = center.x + opposite.x * oppositeDistance;
+    const oppositeY = center.y + opposite.y * oppositeDistance;
+
+    const outwardInsideCloud = isPointInsideOrOnPolygon(outwardX, outwardY, hull);
+    const oppositeInsideCloud = isPointInsideOrOnPolygon(oppositeX, oppositeY, hull);
+    const angleIsInvalid = outwardInsideCloud || oppositeInsideCloud;
+
+    if (!angleIsInvalid) {
+      allowedAngles.push(angle);
+    }
+  }
+
+  return allowedAngles;
+}
+
+export function getAllowedAnglesByRegionKey(
+  regionPrisms: PlanRegionPrism[],
+  points: Point[],
+): Map<string, Set<number>> {
+  const byKey = new Map<string, Set<number>>();
+
+  for (const prism of regionPrisms) {
+    const regionPoints = getPointsInPrism(points, prism.snapshot);
+    const allowedAngles = getAllowedAnglesForRegion(prism, regionPoints);
+    byKey.set(prism.key, new Set(allowedAngles));
+  }
+
+  return byKey;
+}
+
+function createRandomGenome(
+  regions: RegionMeta[],
+  desiredTotalPoints: number,
+  allowedAnglesByRegion: number[][],
+): PlanGenome {
+  const angles = regions.map((_, index) => pickRandomAllowedAngle(allowedAnglesByRegion[index] ?? ALL_ANGLES));
   const quantities = regions.map(() => 0);
 
   const target = Math.max(0, Math.round(desiredTotalPoints));
@@ -158,7 +345,12 @@ function createRandomGenome(regions: RegionMeta[], desiredTotalPoints: number): 
   return { angles, quantities };
 }
 
-function crossover(parentA: PlanGenome, parentB: PlanGenome, maxByRegion: number[]): PlanGenome {
+function crossover(
+  parentA: PlanGenome,
+  parentB: PlanGenome,
+  maxByRegion: number[],
+  allowedAnglesByRegion: number[][],
+): PlanGenome {
   const length = parentA.angles.length;
   if (length === 0) {
     return { angles: [], quantities: [] };
@@ -172,17 +364,25 @@ function crossover(parentA: PlanGenome, parentB: PlanGenome, maxByRegion: number
     const useA = i <= pivot;
     const angleSource = useA ? parentA : parentB;
     const quantitySource = useA ? parentB : parentA;
-    angles[i] = clampAngle(angleSource.angles[i] ?? 0);
+    angles[i] = normalizeAllowedAngle(angleSource.angles[i] ?? 0, allowedAnglesByRegion[i] ?? ALL_ANGLES);
     quantities[i] = clampQuantity(quantitySource.quantities[i] ?? 0, maxByRegion[i] ?? 0);
   }
 
   return { angles, quantities };
 }
 
-function mutate(genome: PlanGenome, maxByRegion: number[], desiredTotalPoints: number): void {
+function mutate(
+  genome: PlanGenome,
+  maxByRegion: number[],
+  desiredTotalPoints: number,
+  allowedAnglesByRegion: number[][],
+): void {
   for (let i = 0; i < genome.angles.length; i += 1) {
     if (Math.random() < 0.25) {
-      genome.angles[i] = clampAngle((genome.angles[i] ?? 0) + (Math.random() * 80 - 40));
+      genome.angles[i] = normalizeAllowedAngle(
+        (genome.angles[i] ?? 0) + (Math.random() * 80 - 40),
+        allowedAnglesByRegion[i] ?? ALL_ANGLES,
+      );
     }
 
     if (Math.random() < 0.4) {
@@ -259,6 +459,15 @@ export async function generatePlan(params: GeneratePlanParams): Promise<Generate
   }
 
   const maxByRegion = regions.map((region) => Math.max(0, Math.round(region.pointCount)));
+  const prismByKey = new Map(regionPrisms.map((regionPrism) => [regionPrism.key, regionPrism]));
+  const allowedAngleSetByRegionKey = getAllowedAnglesByRegionKey(regionPrisms, points);
+  const allowedAnglesByRegion = regions.map((region) => {
+    const allowedSet = allowedAngleSetByRegionKey.get(region.key);
+    if (!allowedSet) {
+      return ALL_ANGLES;
+    }
+    return [...allowedSet];
+  });
   const popSize = getPopulationSize(populationSize);
   const maxGenerations = getGenerationCount(generations);
   const updateStride = getUpdateStride(updateEveryGenerations);
@@ -266,9 +475,16 @@ export async function generatePlan(params: GeneratePlanParams): Promise<Generate
 
   let population: ScoredGenome[] = [];
   for (let i = 0; i < popSize; i += 1) {
-    const genome = createRandomGenome(regions, desiredTotalPoints);
+    const genome = createRandomGenome(regions, desiredTotalPoints, allowedAnglesByRegion);
     population.push(
-      evaluateGenome(regions, regionPrisms, points, genome, desiredTotalPoints, desiredGrade),
+      evaluateGenome(
+        regions,
+        regionPrisms,
+        points,
+        genome,
+        desiredTotalPoints,
+        desiredGrade,
+      ),
     );
   }
   sortByScore(population);
@@ -304,10 +520,17 @@ export async function generatePlan(params: GeneratePlanParams): Promise<Generate
       const fallbackParent = best;
       const a = population[Math.floor(Math.random() * Math.max(2, popSize / 2))] ?? fallbackParent;
       const b = population[Math.floor(Math.random() * Math.max(2, popSize / 2))] ?? fallbackParent;
-      const childGenome = crossover(a.genome, b.genome, maxByRegion);
-      mutate(childGenome, maxByRegion, desiredTotalPoints);
+      const childGenome = crossover(a.genome, b.genome, maxByRegion, allowedAnglesByRegion);
+      mutate(childGenome, maxByRegion, desiredTotalPoints, allowedAnglesByRegion);
       nextPopulation.push(
-        evaluateGenome(regions, regionPrisms, points, childGenome, desiredTotalPoints, desiredGrade),
+        evaluateGenome(
+          regions,
+          regionPrisms,
+          points,
+          childGenome,
+          desiredTotalPoints,
+          desiredGrade,
+        ),
       );
     }
 

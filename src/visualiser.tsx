@@ -25,7 +25,11 @@ import {
   saveStoredPrisms,
 } from "./storage";
 import { computePlanStats } from "./planStats";
-import { generatePlan, type GeneratePlanProgress } from "./planGenerator";
+import {
+  generatePlan,
+  getAllowedAnglesByRegionKey,
+  type GeneratePlanProgress,
+} from "./planGenerator";
 import { usePlanExtractionVolumes } from "./usePlanExtractionVolumes";
 import { useSelectionController } from "./useSelectionController";
 import { useVisualiserScene, type RegionPrism } from "./useVisualiserScene";
@@ -171,6 +175,24 @@ export function Visualiser() {
     () => computePlanStats(regions, plan, regionPrismsRef.current, pointsRef.current),
     [regions, plan],
   );
+  const invalidPlanItemIds = useMemo(() => {
+    const allowedByRegionKey = getAllowedAnglesByRegionKey(regionPrismsRef.current, pointsRef.current);
+    const invalid = new Set<string>();
+
+    for (const item of plan) {
+      const allowedAngles = allowedByRegionKey.get(item.regionKey);
+      if (!allowedAngles) {
+        continue;
+      }
+
+      const normalizedAngle = ((Math.round(item.angle) % 360) + 360) % 360;
+      if (!allowedAngles.has(normalizedAngle)) {
+        invalid.add(item.id);
+      }
+    }
+
+    return invalid;
+  }, [plan, regions]);
 
   useEffect(() => {
     editingRegionKeyRef.current = editingRegionKey;
@@ -326,6 +348,7 @@ export function Visualiser() {
     planExtractionVolumesRef,
     plan,
     extractedPointsByItemId: planStats.extractedPointsByItemId,
+    invalidPlanItemIds,
   });
 
   const handleAddRegionToPlan = useCallback((region: RegionMeta): void => {
