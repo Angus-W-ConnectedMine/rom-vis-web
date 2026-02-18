@@ -224,7 +224,7 @@ function isPointOnSegment(
   return dot <= lengthSquared + epsilon;
 }
 
-function isPointInsideOrOnPolygon(x: number, y: number, polygon: Array<{ x: number; y: number }>): boolean {
+function isPointInsidePolygonStrict(x: number, y: number, polygon: Array<{ x: number; y: number }>): boolean {
   let inside = false;
 
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
@@ -232,7 +232,7 @@ function isPointInsideOrOnPolygon(x: number, y: number, polygon: Array<{ x: numb
     const b = polygon[j]!;
 
     if (isPointOnSegment(x, y, a.x, a.y, b.x, b.y)) {
-      return true;
+      return false;
     }
 
     const intersects = ((a.y > y) !== (b.y > y)) &&
@@ -264,19 +264,10 @@ function getAllowedAnglesForRegion(
   for (let angle = 0; angle < 360; angle += 1) {
     const radians = THREE.MathUtils.degToRad(angle);
     const outward = new THREE.Vector3(Math.cos(radians), Math.sin(radians), 0);
-    const opposite = outward.clone().multiplyScalar(-1);
-
     const outwardDistance = getDistanceToPrismEdge(prism.snapshot, center, outward);
-    const oppositeDistance = getDistanceToPrismEdge(prism.snapshot, center, opposite);
-
-    const outwardX = center.x + outward.x * outwardDistance;
-    const outwardY = center.y + outward.y * outwardDistance;
-    const oppositeX = center.x + opposite.x * oppositeDistance;
-    const oppositeY = center.y + opposite.y * oppositeDistance;
-
-    const outwardInsideCloud = isPointInsideOrOnPolygon(outwardX, outwardY, hull);
-    const oppositeInsideCloud = isPointInsideOrOnPolygon(oppositeX, oppositeY, hull);
-    const angleIsInvalid = outwardInsideCloud || oppositeInsideCloud;
+    const startX = center.x + outward.x * outwardDistance;
+    const startY = center.y + outward.y * outwardDistance;
+    const angleIsInvalid = isPointInsidePolygonStrict(startX, startY, hull);
 
     if (!angleIsInvalid) {
       allowedAngles.push(angle);
