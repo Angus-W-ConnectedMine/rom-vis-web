@@ -351,6 +351,10 @@ button:hover:not(:disabled) {
   flex: 0 0 auto;
 }
 
+.plan-item-actions {
+  align-items: center;
+}
+
 .plan-item input[type="range"] {
   width: 100%;
 }

@@ -6,6 +6,7 @@ interface PlanTabProps {
   plan: PlanItem[];
   onAddRegionToPlan: (region: RegionMeta) => void;
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
+  onDeletePlanItem: (planItemId: string) => void;
 }
 
 export function PlanTab({
@@ -13,6 +14,7 @@ export function PlanTab({
   plan,
   onAddRegionToPlan,
   onUpdatePlanAngle,
+  onDeletePlanItem,
 }: PlanTabProps) {
   return (
     <div className="overlay-tab-content" role="tabpanel" aria-labelledby="overlay-tab-plan">
@@ -21,6 +23,7 @@ export function PlanTab({
         plan={plan}
         onAddRegionToPlan={onAddRegionToPlan}
         onUpdatePlanAngle={onUpdatePlanAngle}
+        onDeletePlanItem={onDeletePlanItem}
       />
     </div>
   );

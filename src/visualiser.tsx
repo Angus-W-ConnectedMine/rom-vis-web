@@ -592,6 +592,10 @@ export function Visualiser() {
     );
   }, []);
 
+  const handleDeletePlanItem = useCallback((planItemId: string): void => {
+    setPlan((prev) => prev.filter((item) => item.id !== planItemId));
+  }, []);
+
   const handleRequestRegionEdit = useCallback((key: string): void => {
     setEditingRegionKey(key);
   }, []);
@@ -700,6 +704,7 @@ export function Visualiser() {
         plan={plan}
         onAddRegionToPlan={handleAddRegionToPlan}
         onUpdatePlanAngle={handleUpdatePlanAngle}
+        onDeletePlanItem={handleDeletePlanItem}
       />
     </div>
   );

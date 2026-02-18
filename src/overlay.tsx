@@ -38,6 +38,7 @@ interface OverlayProps {
   plan: PlanItem[];
   onAddRegionToPlan: (region: RegionMeta) => void;
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
+  onDeletePlanItem: (planItemId: string) => void;
 }
 
 function getSummary(regions: RegionMeta[], selectedRegionKeys: string[]) {
@@ -67,6 +68,7 @@ export function Overlay(props: OverlayProps) {
     plan,
     onAddRegionToPlan,
     onUpdatePlanAngle,
+    onDeletePlanItem,
   } = props;
   const regionItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previousSelectedRegionKeysRef = useRef<string[]>([]);
@@ -146,6 +148,7 @@ export function Overlay(props: OverlayProps) {
             plan={plan}
             onAddRegionToPlan={onAddRegionToPlan}
             onUpdatePlanAngle={onUpdatePlanAngle}
+            onDeletePlanItem={onDeletePlanItem}
           />
         )}
       </aside>

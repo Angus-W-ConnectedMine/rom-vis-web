@@ -11,6 +11,7 @@ interface OperationalPlanProps {
   plan: PlanItem[];
   onAddRegionToPlan: (region: RegionMeta) => void;
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
+  onDeletePlanItem: (planItemId: string) => void;
 }
 
 export default function OperationalPlan({
@@ -18,6 +19,7 @@ export default function OperationalPlan({
   plan,
   onAddRegionToPlan,
   onUpdatePlanAngle,
+  onDeletePlanItem,
 }: OperationalPlanProps) {
   return (
     <div className="card plan-card">
@@ -42,7 +44,24 @@ export default function OperationalPlan({
               <div key={item.id} className="plan-item">
                 <div className="plan-item-row">
                   <strong>{regions.find((region) => region.key === item.regionKey)?.regionId ?? `region-${item.regionKey}`}</strong>
-                  <span>{item.angle} deg</span>
+                  <div className="toolbar plan-item-actions">
+                    <span>{item.angle} deg</span>
+                    <button
+                      className="btn overlay-btn-icon"
+                      type="button"
+                      aria-label="Delete plan item"
+                      title="Delete plan item"
+                      onClick={() => onDeletePlanItem(item.id)}
+                    >
+                      <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
+                        <path
+                          d="M9 3h6l1 2h5v2H3V5h5l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9z"
+                          fill="currentColor"
+                        />
+                        <path d="M6 21h12l1-14H5l1 14z" fill="currentColor" opacity="0.25" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
                 <input
                   type="range"
