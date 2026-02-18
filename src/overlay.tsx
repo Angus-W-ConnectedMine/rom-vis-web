@@ -4,6 +4,7 @@ import { RegionFormModal } from "./regionFormModal";
 import { type PlanGrandTotal, type PlanItem, type PlanOutcomeItem } from "./OperationPlan";
 import { RegionTab } from "./RegionTab";
 import { PlanTab } from "./PlanTab";
+import type { GeneratePlanProgress } from "./planGenerator";
 
 export interface SelectionRect {
   left: number;
@@ -42,6 +43,15 @@ interface OverlayProps {
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
   onUpdatePlanQuantity: (planItemId: string, quantity: number) => void;
   onDeletePlanItem: (planItemId: string) => void;
+  targetTotalPoints: number;
+  targetGrade: number;
+  isGeneratingPlan: boolean;
+  selectedRegionCount: number;
+  planGenerationProgress: GeneratePlanProgress | null;
+  onUpdateTargetTotalPoints: (value: number) => void;
+  onUpdateTargetGrade: (value: number) => void;
+  onGeneratePlan: () => void;
+  onStopGeneratePlan: () => void;
 }
 
 function getSummary(regions: RegionMeta[], selectedRegionKeys: string[]) {
@@ -75,6 +85,15 @@ export function Overlay(props: OverlayProps) {
     onUpdatePlanAngle,
     onUpdatePlanQuantity,
     onDeletePlanItem,
+    targetTotalPoints,
+    targetGrade,
+    isGeneratingPlan,
+    selectedRegionCount,
+    planGenerationProgress,
+    onUpdateTargetTotalPoints,
+    onUpdateTargetGrade,
+    onGeneratePlan,
+    onStopGeneratePlan,
   } = props;
   const regionItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previousSelectedRegionKeysRef = useRef<string[]>([]);
@@ -158,6 +177,15 @@ export function Overlay(props: OverlayProps) {
             onUpdatePlanAngle={onUpdatePlanAngle}
             onUpdatePlanQuantity={onUpdatePlanQuantity}
             onDeletePlanItem={onDeletePlanItem}
+            targetTotalPoints={targetTotalPoints}
+            targetGrade={targetGrade}
+            selectedRegionCount={selectedRegionCount}
+            isGeneratingPlan={isGeneratingPlan}
+            planGenerationProgress={planGenerationProgress}
+            onUpdateTargetTotalPoints={onUpdateTargetTotalPoints}
+            onUpdateTargetGrade={onUpdateTargetGrade}
+            onGeneratePlan={onGeneratePlan}
+            onStopGeneratePlan={onStopGeneratePlan}
           />
         )}
       </aside>

@@ -1,4 +1,5 @@
 import type { RegionMeta } from "./overlay";
+import type { GeneratePlanProgress } from "./planGenerator";
 
 export interface PlanItem {
   id: string;
@@ -30,6 +31,15 @@ interface OperationalPlanProps {
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
   onUpdatePlanQuantity: (planItemId: string, quantity: number) => void;
   onDeletePlanItem: (planItemId: string) => void;
+  targetTotalPoints: number;
+  targetGrade: number;
+  selectedRegionCount: number;
+  isGeneratingPlan: boolean;
+  planGenerationProgress: GeneratePlanProgress | null;
+  onUpdateTargetTotalPoints: (value: number) => void;
+  onUpdateTargetGrade: (value: number) => void;
+  onGeneratePlan: () => void;
+  onStopGeneratePlan: () => void;
 }
 
 export default function OperationalPlan({
@@ -41,10 +51,58 @@ export default function OperationalPlan({
   onUpdatePlanAngle,
   onUpdatePlanQuantity,
   onDeletePlanItem,
+  targetTotalPoints,
+  targetGrade,
+  selectedRegionCount,
+  isGeneratingPlan,
+  planGenerationProgress,
+  onUpdateTargetTotalPoints,
+  onUpdateTargetGrade,
+  onGeneratePlan,
+  onStopGeneratePlan,
 }: OperationalPlanProps) {
   return (
     <div className="card plan-card">
       <h4>Plan</h4>
+
+      <div className="plan-generator">
+        <p>Generator target:</p>
+        <div className="display-grid">
+          <span>Total points:</span>
+          <input
+            type="number"
+            min={0}
+            step={10}
+            value={targetTotalPoints}
+            onChange={(event) => onUpdateTargetTotalPoints(Number(event.target.value))}
+          />
+          <span>Average grade:</span>
+          <input
+            type="number"
+            step={0.1}
+            value={targetGrade}
+            onChange={(event) => onUpdateTargetGrade(Number(event.target.value))}
+          />
+        </div>
+        <div className="plan-generator-actions toolbar">
+          <button type="button" onClick={onGeneratePlan} disabled={isGeneratingPlan || regions.length === 0}>
+            Generate plan
+          </button>
+          <button type="button" onClick={onStopGeneratePlan} disabled={!isGeneratingPlan}>
+            Stop
+          </button>
+        </div>
+        <p className="plan-generator-note">
+          Using {selectedRegionCount > 0 ? selectedRegionCount : regions.length} region(s)
+          {selectedRegionCount > 0 ? " from current selection." : " (all regions)."}
+        </p>
+        {planGenerationProgress ? (
+          <p className="plan-generator-progress">
+            Best candidate gen {planGenerationProgress.generation}: {planGenerationProgress.bestStats.grandTotal.extractedPointCount} points @ grade{" "}
+            {planGenerationProgress.bestStats.grandTotal.averageW.toFixed(2)}
+          </p>
+        ) : null}
+      </div>
 
       <p>Add from:</p>
 

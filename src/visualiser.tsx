@@ -25,6 +25,7 @@ import {
   saveStoredPrisms,
 } from "./storage";
 import { computePlanStats } from "./planStats";
+import { generatePlan, type GeneratePlanProgress } from "./planGenerator";
 import { usePlanExtractionVolumes } from "./usePlanExtractionVolumes";
 import { useSelectionController } from "./useSelectionController";
 import { useVisualiserScene, type RegionPrism } from "./useVisualiserScene";
@@ -158,6 +159,11 @@ export function Visualiser() {
   const [editingRegionKey, setEditingRegionKey] = useState<string | null>(null);
   const [status, setStatus] = useState("Loading points...");
   const [interactionElement, setInteractionElement] = useState<HTMLCanvasElement | null>(null);
+  const [targetTotalPoints, setTargetTotalPoints] = useState(500);
+  const [targetGrade, setTargetGrade] = useState(1);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [planGenerationProgress, setPlanGenerationProgress] = useState<GeneratePlanProgress | null>(null);
+  const generateRunIdRef = useRef(0);
 
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const editingRegionKeyRef = useRef<string | null>(null);
@@ -361,6 +367,95 @@ export function Visualiser() {
     );
   }, []);
 
+  const handleUpdateTargetTotalPoints = useCallback((value: number): void => {
+    const normalized = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+    setTargetTotalPoints(normalized);
+  }, []);
+
+  const handleUpdateTargetGrade = useCallback((value: number): void => {
+    const normalized = Number.isFinite(value) ? value : 0;
+    setTargetGrade(normalized);
+  }, []);
+
+  const handleStopGeneratePlan = useCallback((): void => {
+    if (!isGeneratingPlan) {
+      return;
+    }
+    generateRunIdRef.current += 1;
+    setIsGeneratingPlan(false);
+    setStatus("Plan generation stopped.");
+  }, [isGeneratingPlan]);
+
+  const handleGeneratePlan = useCallback(async (): Promise<void> => {
+    if (isGeneratingPlan) {
+      return;
+    }
+
+    const selectedKeySet = new Set(selectedRegionKeys);
+    const selectedRegions = selectedRegionKeys.length > 0
+      ? regions.filter((region) => selectedKeySet.has(region.key))
+      : regions;
+
+    if (selectedRegions.length === 0) {
+      setStatus("No regions available for plan generation.");
+      return;
+    }
+
+    const runId = generateRunIdRef.current + 1;
+    generateRunIdRef.current = runId;
+    setIsGeneratingPlan(true);
+    setPlanGenerationProgress(null);
+    setStatus("Generating plan...");
+
+    try {
+      const result = await generatePlan({
+        regions: selectedRegions,
+        regionPrisms: regionPrismsRef.current,
+        points: pointsRef.current,
+        desiredTotalPoints: targetTotalPoints,
+        desiredGrade: targetGrade,
+        shouldContinue: () => generateRunIdRef.current === runId,
+        onProgress: (progress) => {
+          if (generateRunIdRef.current !== runId) {
+            return;
+          }
+          setPlanGenerationProgress(progress);
+          setPlan(progress.bestPlan);
+          setStatus(
+            `Generating plan (gen ${progress.generation}) - points ${progress.bestStats.grandTotal.extractedPointCount}, grade ${progress.bestStats.grandTotal.averageW.toFixed(2)}`,
+          );
+        },
+      });
+
+      if (generateRunIdRef.current !== runId) {
+        return;
+      }
+
+      setPlan(result.plan);
+      setPlanGenerationProgress((prev) =>
+        prev ?? {
+          generation: result.generation,
+          bestScore: result.score,
+          bestPlan: result.plan,
+          bestStats: result.stats,
+          done: result.completed,
+        },
+      );
+
+      if (result.completed) {
+        setStatus(
+          `Plan generated in ${result.generation} generations - points ${result.stats.grandTotal.extractedPointCount}, grade ${result.stats.grandTotal.averageW.toFixed(2)}`,
+        );
+      } else {
+        setStatus("Plan generation stopped.");
+      }
+    } finally {
+      if (generateRunIdRef.current === runId) {
+        setIsGeneratingPlan(false);
+      }
+    }
+  }, [isGeneratingPlan, selectedRegionKeys, regions, targetTotalPoints, targetGrade]);
+
   const handleRequestRegionEdit = useCallback((key: string): void => {
     setEditingRegionKey(key);
   }, []);
@@ -475,6 +570,15 @@ export function Visualiser() {
         onUpdatePlanAngle={handleUpdatePlanAngle}
         onUpdatePlanQuantity={handleUpdatePlanQuantity}
         onDeletePlanItem={handleDeletePlanItem}
+        targetTotalPoints={targetTotalPoints}
+        targetGrade={targetGrade}
+        selectedRegionCount={selectedRegionKeys.length}
+        isGeneratingPlan={isGeneratingPlan}
+        planGenerationProgress={planGenerationProgress}
+        onUpdateTargetTotalPoints={handleUpdateTargetTotalPoints}
+        onUpdateTargetGrade={handleUpdateTargetGrade}
+        onGeneratePlan={handleGeneratePlan}
+        onStopGeneratePlan={handleStopGeneratePlan}
       />
     </div>
   );

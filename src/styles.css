@@ -318,6 +318,32 @@ button:hover:not(:disabled) {
   margin-bottom: 8px;
 }
 
+.plan-generator {
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 10px;
+  background: rgba(2, 6, 23, 0.3);
+}
+
+.plan-generator .display-grid {
+  align-items: center;
+}
+
+.plan-generator .display-grid input {
+  margin-bottom: 0;
+}
+
+.plan-generator-actions {
+  margin-top: 8px;
+}
+
+.plan-generator-note,
+.plan-generator-progress {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+}
+
 .plan-list-container {
   flex: 1 1 auto;
   min-height: 0;
