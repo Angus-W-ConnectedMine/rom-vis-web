@@ -55,7 +55,6 @@ interface OverlayProps {
   onStopGeneratePlan: () => void;
   showInsideDebugPrisms: boolean;
   insideDebugPrismCount: number;
-  edgeDebugSampleCount: number;
   onToggleInsideDebugPrisms: () => void;
 }
 
@@ -101,7 +100,6 @@ export function Overlay(props: OverlayProps) {
     onStopGeneratePlan,
     showInsideDebugPrisms,
     insideDebugPrismCount,
-    edgeDebugSampleCount,
     onToggleInsideDebugPrisms,
   } = props;
   const regionItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -210,7 +208,6 @@ export function Overlay(props: OverlayProps) {
           <DebugTab
             showInsideDebugPrisms={showInsideDebugPrisms}
             insideDebugPrismCount={insideDebugPrismCount}
-            edgeDebugSampleCount={edgeDebugSampleCount}
             onToggleInsideDebugPrisms={onToggleInsideDebugPrisms}
           />
         )}

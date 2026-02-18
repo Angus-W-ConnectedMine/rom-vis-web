@@ -145,7 +145,54 @@ function getRegionMetaFromSelection(
   };
 }
 
-function buildInsideDebugSnapshots(points: Point[], gridResolution = 22): PrismSnapshot[] {
+function cross2D(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }): number {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function getConvexHull2D(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+  if (points.length <= 1) {
+    return points;
+  }
+
+  const sorted = [...points].sort((left, right) => (
+    left.x === right.x ? left.y - right.y : left.x - right.x
+  ));
+
+  const unique: Array<{ x: number; y: number }> = [];
+  for (const point of sorted) {
+    const last = unique[unique.length - 1];
+    if (!last || last.x !== point.x || last.y !== point.y) {
+      unique.push(point);
+    }
+  }
+
+  if (unique.length <= 2) {
+    return unique;
+  }
+
+  const lower: Array<{ x: number; y: number }> = [];
+  for (const point of unique) {
+    while (lower.length >= 2 && cross2D(lower[lower.length - 2]!, lower[lower.length - 1]!, point) <= 0) {
+      lower.pop();
+    }
+    lower.push(point);
+  }
+
+  const upper: Array<{ x: number; y: number }> = [];
+  for (let i = unique.length - 1; i >= 0; i -= 1) {
+    const point = unique[i]!;
+    while (upper.length >= 2 && cross2D(upper[upper.length - 2]!, upper[upper.length - 1]!, point) <= 0) {
+      upper.pop();
+    }
+    upper.push(point);
+  }
+
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+function buildInsideDebugSnapshots(points: Point[], gridResolution = 64): PrismSnapshot[] {
   if (points.length === 0) {
     return [];
   }
@@ -166,13 +213,13 @@ function buildInsideDebugSnapshots(points: Point[], gridResolution = 22): PrismS
     if (point.z > maxZ) maxZ = point.z;
   }
 
-  const columns = Math.max(4, gridResolution);
-  const rows = Math.max(4, gridResolution);
+  const columns = Math.max(8, gridResolution);
+  const rows = Math.max(8, gridResolution);
   const width = Math.max(1e-6, maxX - minX);
   const height = Math.max(1e-6, maxY - minY);
   const cellWidth = width / columns;
   const cellHeight = height / rows;
-  const counts = new Array<number>(columns * rows).fill(0);
+  const pointsByCell = new Map<number, Point[]>();
 
   for (const point of points) {
     const xNorm = (point.x - minX) / width;
@@ -180,35 +227,123 @@ function buildInsideDebugSnapshots(points: Point[], gridResolution = 22): PrismS
     const column = THREE.MathUtils.clamp(Math.floor(xNorm * columns), 0, columns - 1);
     const row = THREE.MathUtils.clamp(Math.floor(yNorm * rows), 0, rows - 1);
     const index = row * columns + column;
-    counts[index] = (counts[index] ?? 0) + 1;
-  }
-
-  const snapshots: PrismSnapshot[] = [];
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const count = counts[row * columns + column];
-      if (!count) {
-        continue;
-      }
-
-      const x0 = minX + column * cellWidth;
-      const x1 = x0 + cellWidth;
-      const y0 = minY + row * cellHeight;
-      const y1 = y0 + cellHeight;
-      snapshots.push({
-        minZ,
-        maxZ,
-        footprint: [
-          { x: x0, y: y0 },
-          { x: x1, y: y0 },
-          { x: x1, y: y1 },
-          { x: x0, y: y1 },
-        ],
-      });
+    const cellPoints = pointsByCell.get(index);
+    if (cellPoints) {
+      cellPoints.push(point);
+    } else {
+      pointsByCell.set(index, [point]);
     }
   }
 
+  const occupied = new Set(pointsByCell.keys());
+  const visited = new Set<number>();
+  const snapshots: PrismSnapshot[] = [];
+
+  const minComponentPointCount = 20;
+
+  for (const startIndex of occupied) {
+    if (visited.has(startIndex)) {
+      continue;
+    }
+
+    const queue = [startIndex];
+    visited.add(startIndex);
+    const componentPoints: Point[] = [];
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (current === undefined) {
+        continue;
+      }
+
+      const pointsInCell = pointsByCell.get(current);
+      if (pointsInCell) {
+        componentPoints.push(...pointsInCell);
+      }
+
+      const row = Math.floor(current / columns);
+      const column = current % columns;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (dx === 0 && dy === 0) {
+            continue;
+          }
+          const nextRow = row + dy;
+          const nextColumn = column + dx;
+          if (nextRow < 0 || nextRow >= rows || nextColumn < 0 || nextColumn >= columns) {
+            continue;
+          }
+          const neighbor = nextRow * columns + nextColumn;
+          if (!occupied.has(neighbor) || visited.has(neighbor)) {
+            continue;
+          }
+          visited.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    if (componentPoints.length < minComponentPointCount) {
+      continue;
+    }
+
+    let componentMinZ = Infinity;
+    let componentMaxZ = -Infinity;
+    const hull = getConvexHull2D(componentPoints.map((point) => ({ x: point.x, y: point.y })));
+    if (hull.length < 3) {
+      continue;
+    }
+
+    for (const point of componentPoints) {
+      if (point.z < componentMinZ) componentMinZ = point.z;
+      if (point.z > componentMaxZ) componentMaxZ = point.z;
+    }
+
+    snapshots.push({
+      minZ: componentMinZ,
+      maxZ: componentMaxZ,
+      footprint: hull,
+    });
+  }
+
+  if (snapshots.length === 0) {
+    const x0 = minX;
+    const x1 = minX + cellWidth;
+    const y0 = minY;
+    const y1 = minY + cellHeight;
+    snapshots.push({
+      minZ,
+      maxZ,
+      footprint: [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ],
+    });
+  }
+
   return snapshots;
+}
+
+function clearDebugPrisms(scene: THREE.Scene, prismGroups: THREE.Group[]): void {
+  for (const prism of prismGroups) {
+    scene.remove(prism);
+    prism.traverse((node) => {
+      if (node instanceof THREE.Mesh) {
+        node.geometry.dispose();
+        if (node.material instanceof THREE.Material) {
+          node.material.dispose();
+        }
+      }
+      if (node instanceof THREE.LineSegments) {
+        node.geometry.dispose();
+        if (node.material instanceof THREE.Material) {
+          node.material.dispose();
+        }
+      }
+    });
+  }
 }
 
 
@@ -427,9 +562,7 @@ export function Visualiser() {
       return;
     }
 
-    for (const prism of debugInsidePrismsRef.current) {
-      scene.remove(prism);
-    }
+    clearDebugPrisms(scene, debugInsidePrismsRef.current);
     debugInsidePrismsRef.current = [];
     setInsideDebugPrismCount(0);
 
@@ -461,7 +594,7 @@ export function Visualiser() {
 
     debugInsidePrismsRef.current = created;
     setInsideDebugPrismCount(created.length);
-  }, [showInsideDebugPrisms, regions.length]);
+  }, [showInsideDebugPrisms, regions.length, regionsHydrated]);
 
   const handleAddRegionToPlan = useCallback((region: RegionMeta): void => {
     const planItemId = crypto.randomUUID();
