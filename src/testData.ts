@@ -11,6 +11,10 @@ function rand(min: number, max: number): number {
   return Math.random() * (max - min) + min;
 }
 
+export function shouldInsertGeneratedPoint(point: Point | undefined, w: number | undefined): boolean {
+  return point !== undefined && w !== undefined;
+}
+
 function generateWValues(count: number): Float64Array {
   const values = new Float64Array(count);
 
@@ -124,7 +128,7 @@ export async function generateTestData() {
       const point = data[i];
       const w = values[i];
 
-      if (!point || !w) continue;
+      if (!shouldInsertGeneratedPoint(point, w)) continue;
 
       insert.run(point.x, point.y, point.z, w);
     }
