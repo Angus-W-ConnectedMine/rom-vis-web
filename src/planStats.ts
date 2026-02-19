@@ -20,6 +20,11 @@ export interface PlanRegionPrism {
 const START_OFFSET_FROM_REGION_EDGE = 10;
 const START_CLEARANCE_RADIUS = 5;
 
+export interface ValidStartAngleOptions {
+  startOffsetFromRegionEdge?: number;
+  startClearanceRadius?: number;
+}
+
 function getDepthFromRegionEdge(
   point: Point,
   center: THREE.Vector3,
@@ -164,7 +169,7 @@ function hasPointsWithinRadiusXY(
   return false;
 }
 
-function getNormalizedAngleIndex(angleDegrees: number): number {
+export function getNormalizedAngleIndex(angleDegrees: number): number {
   const rounded = Math.round(angleDegrees);
   const modulo = rounded % 360;
   return modulo >= 0 ? modulo : modulo + 360;
@@ -173,7 +178,10 @@ function getNormalizedAngleIndex(angleDegrees: number): number {
 export function computeValidStartAnglesForRegion(
   snapshot: PrismSnapshot,
   points: Point[],
+  options?: ValidStartAngleOptions,
 ): boolean[] {
+  const startOffsetFromRegionEdge = options?.startOffsetFromRegionEdge ?? START_OFFSET_FROM_REGION_EDGE;
+  const startClearanceRadius = options?.startClearanceRadius ?? START_CLEARANCE_RADIUS;
   const validAngles = new Array<boolean>(360).fill(false);
   const center = getRegionCenter(snapshot);
 
@@ -195,12 +203,12 @@ export function computeValidStartAnglesForRegion(
 
     const centerProjection = (center.x * outward.x) + (center.y * outward.y);
     const distanceToEdge = regionEdgeProjection - centerProjection;
-    const startDistanceFromCenter = distanceToEdge + START_OFFSET_FROM_REGION_EDGE;
+    const startDistanceFromCenter = distanceToEdge + startOffsetFromRegionEdge;
     const startPosition = {
       x: center.x + (outward.x * startDistanceFromCenter),
       y: center.y + (outward.y * startDistanceFromCenter),
     };
-    validAngles[angle] = !hasPointsWithinRadiusXY(points, startPosition, START_CLEARANCE_RADIUS);
+    validAngles[angle] = !hasPointsWithinRadiusXY(points, startPosition, startClearanceRadius);
   }
 
   return validAngles;
