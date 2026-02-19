@@ -1,5 +1,4 @@
-import type { RegionMeta } from "./overlay";
-import type { GeneratedPlanCandidate } from "./generatePlan";
+import { usePlanUiContext } from "./planUiContext";
 
 export interface PlanItem {
   id: string;
@@ -22,45 +21,26 @@ export interface PlanGrandTotal {
   averageW: number;
 }
 
-interface OperationalPlanProps {
-  regions: RegionMeta[];
-  plan: PlanItem[];
-  outcomeByItemId: Record<string, PlanOutcomeItem>;
-  grandTotal: PlanGrandTotal;
-  onAddRegionToPlan: (region: RegionMeta) => void;
-  onUpdatePlanAngle: (planItemId: string, angle: number) => void;
-  onUpdatePlanQuantity: (planItemId: string, quantity: number) => void;
-  onDeletePlanItem: (planItemId: string) => void;
-  generationTargetPointCount: number;
-  generationTargetAverageW: number;
-  generationRunning: boolean;
-  generationBestCandidate: GeneratedPlanCandidate | null;
-  generationBestGeneration: number;
-  onUpdateGenerationTargetPointCount: (value: number) => void;
-  onUpdateGenerationTargetAverageW: (value: number) => void;
-  onStartGeneration: () => void;
-  onStopGeneration: () => void;
-}
-
-export default function OperationalPlan({
-  regions,
-  plan,
-  outcomeByItemId,
-  grandTotal,
-  onAddRegionToPlan,
-  onUpdatePlanAngle,
-  onUpdatePlanQuantity,
-  onDeletePlanItem,
-  generationTargetPointCount,
-  generationTargetAverageW,
-  generationRunning,
-  generationBestCandidate,
-  generationBestGeneration,
-  onUpdateGenerationTargetPointCount,
-  onUpdateGenerationTargetAverageW,
-  onStartGeneration,
-  onStopGeneration,
-}: OperationalPlanProps) {
+export default function OperationalPlan() {
+  const {
+    regions,
+    plan,
+    outcomeByItemId,
+    grandTotal,
+    onAddRegionToPlan,
+    onUpdatePlanAngle,
+    onUpdatePlanQuantity,
+    onDeletePlanItem,
+    generationTargetPointCount,
+    generationTargetAverageW,
+    generationRunning,
+    generationBestCandidate,
+    generationBestGeneration,
+    onUpdateGenerationTargetPointCount,
+    onUpdateGenerationTargetAverageW,
+    onStartGeneration,
+    onStopGeneration,
+  } = usePlanUiContext();
   return (
     <div className="card plan-card">
       <h4>Plan</h4>

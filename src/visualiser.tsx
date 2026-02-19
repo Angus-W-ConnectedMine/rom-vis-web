@@ -25,6 +25,7 @@ import type { GeneratedPlanCandidate } from "./generatePlan";
 import { usePlanExtractionVolumes } from "./usePlanExtractionVolumes";
 import { useSelectionController } from "./useSelectionController";
 import { useVisualiserScene, type RegionPrism } from "./useVisualiserScene";
+import { PlanUiProvider, type PlanUiContextValue } from "./planUiContext";
 import {
   buildGeneratePlanRequest,
   candidateToPlanItems,
@@ -573,38 +574,60 @@ export function Visualiser() {
     ? null
     : regions.find((region) => region.key === editingRegionKey) ?? null;
 
+  const planUiContextValue = useMemo<PlanUiContextValue>(() => ({
+    regions,
+    plan: displayPlan,
+    outcomeByItemId: planStats.outcomeByItemId,
+    grandTotal: planStats.grandTotal,
+    onAddRegionToPlan: handleAddRegionToPlan,
+    onUpdatePlanAngle: handleUpdatePlanAngle,
+    onUpdatePlanQuantity: handleUpdatePlanQuantity,
+    onDeletePlanItem: handleDeletePlanItem,
+    generationTargetPointCount,
+    generationTargetAverageW,
+    generationRunning,
+    generationBestCandidate,
+    generationBestGeneration,
+    onUpdateGenerationTargetPointCount: (value) => setGenerationTargetPointCount(normalizeTargetPointCount(value)),
+    onUpdateGenerationTargetAverageW: (value) => setGenerationTargetAverageW(normalizeTargetAverageW(value)),
+    onStartGeneration: handleStartPlanGeneration,
+    onStopGeneration: handleStopPlanGeneration,
+  }), [
+    regions,
+    displayPlan,
+    planStats.outcomeByItemId,
+    planStats.grandTotal,
+    handleAddRegionToPlan,
+    handleUpdatePlanAngle,
+    handleUpdatePlanQuantity,
+    handleDeletePlanItem,
+    generationTargetPointCount,
+    generationTargetAverageW,
+    generationRunning,
+    generationBestCandidate,
+    generationBestGeneration,
+    handleStartPlanGeneration,
+    handleStopPlanGeneration,
+  ]);
+
   return (
-    <div className="visualiser-root">
-      <div ref={viewportRef} className="visualiser-viewport" />
-      <Overlay
-        selectionRect={selectionRect}
-        editingRegion={editingRegion}
-        onSaveRegionEdit={handleSaveRegionEdit}
-        onCancelRegionEdit={handleCancelRegionEdit}
-        onRequestRegionEdit={handleRequestRegionEdit}
-        status={status}
-        regions={regions}
-        selectedRegionKeys={selectedRegionKeys}
-        onSelectRegion={handleSelectRegion}
-        onDeleteRegion={handleDeleteRegion}
-        onClearSelections={handleClearSelections}
-        plan={displayPlan}
-        outcomeByItemId={planStats.outcomeByItemId}
-        grandTotal={planStats.grandTotal}
-        onAddRegionToPlan={handleAddRegionToPlan}
-        onUpdatePlanAngle={handleUpdatePlanAngle}
-        onUpdatePlanQuantity={handleUpdatePlanQuantity}
-        onDeletePlanItem={handleDeletePlanItem}
-        generationTargetPointCount={generationTargetPointCount}
-        generationTargetAverageW={generationTargetAverageW}
-        generationRunning={generationRunning}
-        generationBestCandidate={generationBestCandidate}
-        generationBestGeneration={generationBestGeneration}
-        onUpdateGenerationTargetPointCount={(value) => setGenerationTargetPointCount(normalizeTargetPointCount(value))}
-        onUpdateGenerationTargetAverageW={(value) => setGenerationTargetAverageW(normalizeTargetAverageW(value))}
-        onStartGeneration={handleStartPlanGeneration}
-        onStopGeneration={handleStopPlanGeneration}
-      />
-    </div>
+    <PlanUiProvider value={planUiContextValue}>
+      <div className="visualiser-root">
+        <div ref={viewportRef} className="visualiser-viewport" />
+        <Overlay
+          selectionRect={selectionRect}
+          editingRegion={editingRegion}
+          onSaveRegionEdit={handleSaveRegionEdit}
+          onCancelRegionEdit={handleCancelRegionEdit}
+          onRequestRegionEdit={handleRequestRegionEdit}
+          status={status}
+          regions={regions}
+          selectedRegionKeys={selectedRegionKeys}
+          onSelectRegion={handleSelectRegion}
+          onDeleteRegion={handleDeleteRegion}
+          onClearSelections={handleClearSelections}
+        />
+      </div>
+    </PlanUiProvider>
   );
 }

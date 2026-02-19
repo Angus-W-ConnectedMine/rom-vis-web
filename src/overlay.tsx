@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Point } from "./points";
 import { RegionFormModal } from "./regionFormModal";
-import { type PlanGrandTotal, type PlanItem, type PlanOutcomeItem } from "./OperationPlan";
-import type { GeneratedPlanCandidate } from "./generatePlan";
 import { RegionTab } from "./RegionTab";
 import { PlanTab } from "./PlanTab";
 
@@ -36,22 +34,6 @@ interface OverlayProps {
   onSelectRegion: (key: string) => void;
   onDeleteRegion: (key: string) => void;
   onClearSelections: () => void;
-  plan: PlanItem[];
-  outcomeByItemId: Record<string, PlanOutcomeItem>;
-  grandTotal: PlanGrandTotal;
-  onAddRegionToPlan: (region: RegionMeta) => void;
-  onUpdatePlanAngle: (planItemId: string, angle: number) => void;
-  onUpdatePlanQuantity: (planItemId: string, quantity: number) => void;
-  onDeletePlanItem: (planItemId: string) => void;
-  generationTargetPointCount: number;
-  generationTargetAverageW: number;
-  generationRunning: boolean;
-  generationBestCandidate: GeneratedPlanCandidate | null;
-  generationBestGeneration: number;
-  onUpdateGenerationTargetPointCount: (value: number) => void;
-  onUpdateGenerationTargetAverageW: (value: number) => void;
-  onStartGeneration: () => void;
-  onStopGeneration: () => void;
 }
 
 function getSummary(regions: RegionMeta[], selectedRegionKeys: string[]) {
@@ -78,22 +60,6 @@ export function Overlay(props: OverlayProps) {
     onSelectRegion,
     onDeleteRegion,
     onClearSelections,
-    plan,
-    outcomeByItemId,
-    grandTotal,
-    onAddRegionToPlan,
-    onUpdatePlanAngle,
-    onUpdatePlanQuantity,
-    onDeletePlanItem,
-    generationTargetPointCount,
-    generationTargetAverageW,
-    generationRunning,
-    generationBestCandidate,
-    generationBestGeneration,
-    onUpdateGenerationTargetPointCount,
-    onUpdateGenerationTargetAverageW,
-    onStartGeneration,
-    onStopGeneration,
   } = props;
   const regionItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previousSelectedRegionKeysRef = useRef<string[]>([]);
@@ -168,25 +134,7 @@ export function Overlay(props: OverlayProps) {
             onClearSelections={onClearSelections}
           />
         ) : (
-          <PlanTab
-            regions={regions}
-            plan={plan}
-            outcomeByItemId={outcomeByItemId}
-            grandTotal={grandTotal}
-            onAddRegionToPlan={onAddRegionToPlan}
-            onUpdatePlanAngle={onUpdatePlanAngle}
-            onUpdatePlanQuantity={onUpdatePlanQuantity}
-            onDeletePlanItem={onDeletePlanItem}
-            generationTargetPointCount={generationTargetPointCount}
-            generationTargetAverageW={generationTargetAverageW}
-            generationRunning={generationRunning}
-            generationBestCandidate={generationBestCandidate}
-            generationBestGeneration={generationBestGeneration}
-            onUpdateGenerationTargetPointCount={onUpdateGenerationTargetPointCount}
-            onUpdateGenerationTargetAverageW={onUpdateGenerationTargetAverageW}
-            onStartGeneration={onStartGeneration}
-            onStopGeneration={onStopGeneration}
-          />
+          <PlanTab />
         )}
       </aside>
 
