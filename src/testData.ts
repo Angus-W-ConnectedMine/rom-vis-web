@@ -11,8 +11,15 @@ function rand(min: number, max: number): number {
   return Math.random() * (max - min) + min;
 }
 
-export function shouldInsertGeneratedPoint(point: Point | undefined, w: number | undefined): boolean {
-  return point !== undefined && w !== undefined;
+export function toInsertableGeneratedPoint(
+  point: Point | undefined,
+  w: number | undefined,
+): { point: Point; w: number } | null {
+  if (point === undefined || w === undefined) {
+    return null;
+  }
+
+  return { point, w };
 }
 
 function generateWValues(count: number): Float64Array {
@@ -125,12 +132,9 @@ export async function generateTestData() {
 
   const insertMany = db.transaction((data: Point[], values: Float64Array) => {
     for (let i = 0; i < data.length; i += 1) {
-      const point = data[i];
-      const w = values[i];
-
-      if (!shouldInsertGeneratedPoint(point, w)) continue;
-
-      insert.run(point.x, point.y, point.z, w);
+      const entry = toInsertableGeneratedPoint(data[i], values[i]);
+      if (!entry) continue;
+      insert.run(entry.point.x, entry.point.y, entry.point.z, entry.w);
     }
   });
 

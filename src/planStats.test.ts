@@ -103,10 +103,10 @@ describe("computePlanStats", () => {
       validStartAngles,
     }], points);
 
-    expect(stats.outcomeByItemId.p1.extractedPointCount).toBe(2);
-    expect(stats.outcomeByItemId.p1.extractedAverageW).toBe(8);
-    expect(stats.outcomeByItemId.p2.extractedPointCount).toBe(1);
-    expect(stats.outcomeByItemId.p2.extractedAverageW).toBe(2);
+    expect(stats.outcomeByItemId.p1!.extractedPointCount).toBe(2);
+    expect(stats.outcomeByItemId.p1!.extractedAverageW).toBe(8);
+    expect(stats.outcomeByItemId.p2!.extractedPointCount).toBe(1);
+    expect(stats.outcomeByItemId.p2!.extractedAverageW).toBe(2);
 
     expect(stats.grandTotal.extractedPointCount).toBe(3);
     expect(stats.grandTotal.averageW).toBe(6);

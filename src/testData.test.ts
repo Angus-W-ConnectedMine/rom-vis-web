@@ -1,13 +1,16 @@
 import { describe, expect, it } from "bun:test";
-import { shouldInsertGeneratedPoint } from "./testData";
+import { toInsertableGeneratedPoint } from "./testData";
 
-describe("shouldInsertGeneratedPoint", () => {
+describe("toInsertableGeneratedPoint", () => {
   it("allows zero W values", () => {
-    expect(shouldInsertGeneratedPoint({ x: 1, y: 2, z: 3, w: 0 }, 0)).toBe(true);
+    expect(toInsertableGeneratedPoint({ x: 1, y: 2, z: 3, w: 0 }, 0)).toEqual({
+      point: { x: 1, y: 2, z: 3, w: 0 },
+      w: 0,
+    });
   });
 
   it("rejects missing point or W", () => {
-    expect(shouldInsertGeneratedPoint(undefined, 1)).toBe(false);
-    expect(shouldInsertGeneratedPoint({ x: 1, y: 2, z: 3, w: 1 }, undefined)).toBe(false);
+    expect(toInsertableGeneratedPoint(undefined, 1)).toBeNull();
+    expect(toInsertableGeneratedPoint({ x: 1, y: 2, z: 3, w: 1 }, undefined)).toBeNull();
   });
 });

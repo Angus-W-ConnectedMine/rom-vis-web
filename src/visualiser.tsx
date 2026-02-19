@@ -3,21 +3,17 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import {
-  addPointClouds,
-  getPointsInPrism,
   getPrismSnapshot,
   addSelectionPrism,
   getPointsInScreenSelection,
   toStoredPrism,
-  type PrismSnapshot,
-  getRegionCenter,
 } from "./geometry";
 import {
   Overlay,
   type RegionMeta,
   type SelectionRect,
 } from "./overlay";
-import type { PlanGrandTotal, PlanItem, PlanOutcomeItem } from "./OperationPlan";
+import type { PlanItem } from "./OperationPlan";
 import type { Point } from "./points";
 import {
   loadStoredPlan,
@@ -25,10 +21,29 @@ import {
   saveStoredPrisms,
 } from "./storage";
 import { computePlanStats, computeValidStartAnglesForRegion } from "./planStats";
-import type { GeneratePlanRequest, GeneratedPlanCandidate } from "./generatePlan";
+import type { GeneratedPlanCandidate } from "./generatePlan";
 import { usePlanExtractionVolumes } from "./usePlanExtractionVolumes";
 import { useSelectionController } from "./useSelectionController";
 import { useVisualiserScene, type RegionPrism } from "./useVisualiserScene";
+import {
+  buildGeneratePlanRequest,
+  candidateToPlanItems,
+  createDefaultPlanItem,
+  filterPlanByRegionKeys,
+  formatWorkerError,
+  getRegionKeys,
+  getRegionLabelPosition,
+  getRegionMetaFromSelection,
+  getPreviewPlanForRegions,
+  materializeGeneratedPlan,
+  normalizePlanAngle,
+  normalizePlanQuantity,
+  normalizeTargetAverageW,
+  normalizeTargetPointCount,
+  resolveGenerationDone,
+  shouldUpdatePreview,
+  toggleSelectedRegionKey,
+} from "./visualiserLogic";
 
 const REGION_DEFAULT_COLOR = 0x22d3ee;
 const REGION_SELECTED_COLOR = 0xf59e0b;
@@ -36,8 +51,6 @@ const GENERATOR_DEFAULT_TARGET_POINTS = 1000;
 const GENERATOR_DEFAULT_TARGET_GRADE = 0;
 const GENERATOR_PREVIEW_UPDATE_INTERVAL_MS = 250;
 const PLAN_WORKER_SCRIPT_PATH = "/generatePlan.worker.js";
-
-const REGION_LABEL_Z_OFFSET = 1.5;
 
 type WorkerProgressMessage = {
   type: "progress";
@@ -60,43 +73,6 @@ type WorkerDoneMessage = {
 
 type PlanGeneratorWorkerMessage = WorkerReadyMessage | WorkerProgressMessage | WorkerDoneMessage;
 
-function formatWorkerError(event: Event | ErrorEvent): string {
-  if (event instanceof ErrorEvent) {
-    const details: string[] = [];
-    if (typeof event.message === "string" && event.message.length > 0) {
-      details.push(event.message);
-    }
-    if (typeof event.filename === "string" && event.filename.length > 0) {
-      const line = Number.isFinite(event.lineno) ? event.lineno : 0;
-      const column = Number.isFinite(event.colno) ? event.colno : 0;
-      details.push(`${event.filename}:${line}:${column}`);
-    }
-    if (details.length > 0) {
-      return details.join(" @ ");
-    }
-    if (event.error instanceof Error && event.error.message.length > 0) {
-      return event.error.message;
-    }
-  }
-
-  if (typeof event.type === "string" && event.type.length > 0) {
-    return `event type: ${event.type}`;
-  }
-
-  return "unknown worker error";
-}
-
-function candidateToPlanItems(candidate: GeneratedPlanCandidate): PlanItem[] {
-  return candidate.items
-    .filter((item) => item.quantity > 0)
-    .map((item, index) => ({
-      id: `ga-preview-${item.regionKey}-${index}`,
-      regionKey: item.regionKey,
-      angle: item.angle,
-      quantity: item.quantity,
-    }));
-}
-
 function createRegionLabel(regionId: string): CSS2DObject {
   const element = document.createElement("div");
   element.className = "region-label";
@@ -111,97 +87,6 @@ function updateRegionLabel(label: CSS2DObject, regionId: string): void {
     label.element.textContent = regionId;
   }
 }
-
-function getRegionLabelPosition(snapshot: PrismSnapshot): THREE.Vector3 {
-  const center = getRegionCenter(snapshot);
-  return new THREE.Vector3(center.x, center.y, snapshot.maxZ + REGION_LABEL_Z_OFFSET);
-}
-
-function getRegionStats(points: Point[]): { min: Point; max: Point; avgW: number } {
-  let minX = Infinity;
-  let minY = Infinity;
-  let minZ = Infinity;
-  let minW = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  let maxZ = -Infinity;
-  let maxW = -Infinity;
-  let sumW = 0;
-
-  for (const point of points) {
-    if (point.x < minX) minX = point.x;
-    if (point.y < minY) minY = point.y;
-    if (point.z < minZ) minZ = point.z;
-    if (point.w < minW) minW = point.w;
-    if (point.x > maxX) maxX = point.x;
-    if (point.y > maxY) maxY = point.y;
-    if (point.z > maxZ) maxZ = point.z;
-    if (point.w > maxW) maxW = point.w;
-    sumW += point.w;
-  }
-
-  return {
-    min: { x: minX, y: minY, z: minZ, w: minW },
-    max: { x: maxX, y: maxY, z: maxZ, w: maxW },
-    avgW: points.length > 0 ? sumW / points.length : 0,
-  };
-}
-
-function getRegionMetaFromSelection(
-  key: string,
-  regionId: string,
-  snapshot: PrismSnapshot,
-  selectedPoints: Point[],
-  pointOffset: { x: number; y: number; z: number },
-): RegionMeta {
-  if (selectedPoints.length > 0) {
-    const region = getRegionStats(selectedPoints);
-    return {
-      key,
-      regionId,
-      pointCount: selectedPoints.length,
-      minW: region.min.w,
-      maxW: region.max.w,
-      avgW: region.avgW,
-      min: {
-        x: region.min.x + pointOffset.x,
-        y: region.min.y + pointOffset.y,
-        z: region.min.z + pointOffset.z,
-        w: region.min.w,
-      },
-      max: {
-        x: region.max.x + pointOffset.x,
-        y: region.max.y + pointOffset.y,
-        z: region.max.z + pointOffset.z,
-        w: region.max.w,
-      },
-    };
-  }
-
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  for (const point of snapshot.footprint) {
-    if (point.x < minX) minX = point.x;
-    if (point.y < minY) minY = point.y;
-    if (point.x > maxX) maxX = point.x;
-    if (point.y > maxY) maxY = point.y;
-  }
-
-  return {
-    key,
-    regionId,
-    pointCount: 0,
-    minW: 0,
-    maxW: 0,
-    avgW: 0,
-    min: { x: minX + pointOffset.x, y: minY + pointOffset.y, z: snapshot.minZ + pointOffset.z, w: 0 },
-    max: { x: maxX + pointOffset.x, y: maxY + pointOffset.y, z: snapshot.maxZ + pointOffset.z, w: 0 },
-  };
-}
-
 
 export function Visualiser() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -286,12 +171,9 @@ export function Visualiser() {
         setGenerationBestCandidate(message.candidate);
         setGenerationBestGeneration(message.generation);
         const now = Date.now();
-        if ((now - lastPreviewUpdateAtRef.current) >= GENERATOR_PREVIEW_UPDATE_INTERVAL_MS) {
+        if (shouldUpdatePreview(lastPreviewUpdateAtRef.current, now, GENERATOR_PREVIEW_UPDATE_INTERVAL_MS)) {
           lastPreviewUpdateAtRef.current = now;
-          const regionKeys = new Set(regionsRef.current.map((region) => region.key));
-          const nextPreviewPlan = candidateToPlanItems(message.candidate)
-            .filter((item) => regionKeys.has(item.regionKey));
-          setPreviewPlan(nextPreviewPlan);
+          setPreviewPlan(getPreviewPlanForRegions(message.candidate, regionsRef.current));
         }
         return;
       }
@@ -304,22 +186,17 @@ export function Visualiser() {
       setGenerationBestCandidate(message.candidate);
       setPreviewPlan(null);
 
-      if (message.cancelled) {
-        setStatus("Plan generation stopped.");
-        return;
+      const done = resolveGenerationDone(
+        message.candidate,
+        message.cancelled,
+        regionsRef.current,
+        () => crypto.randomUUID(),
+      );
+      if (done.plan) {
+        setPlan(done.plan);
+        saveStoredPlan(done.plan);
       }
-
-      const regionKeys = new Set(regionsRef.current.map((region) => region.key));
-      const nextPlan: PlanItem[] = candidateToPlanItems(message.candidate)
-        .filter((item) => regionKeys.has(item.regionKey))
-        .map((item) => ({
-          ...item,
-          id: crypto.randomUUID(),
-        }));
-
-      setPlan(nextPlan);
-      saveStoredPlan(nextPlan);
-      setStatus("Plan generation complete.");
+      setStatus(done.status);
     };
     planGeneratorWorkerRef.current = worker;
     return worker;
@@ -501,8 +378,8 @@ export function Visualiser() {
     }
 
     setPlan((prev) => {
-      const regionKeys = new Set(regions.map((region) => region.key));
-      const next = prev.filter((item) => regionKeys.has(item.regionKey));
+      const regionKeys = getRegionKeys(regions);
+      const next = filterPlanByRegionKeys(prev, regionKeys);
       return next.length === prev.length ? prev : next;
     });
   }, [regions, regionsHydrated]);
@@ -531,16 +408,10 @@ export function Visualiser() {
   });
 
   const handleAddRegionToPlan = useCallback((region: RegionMeta): void => {
-    const planItemId = crypto.randomUUID();
     setPlan((prev) => {
       const next = [
         ...prev,
-        {
-          id: planItemId,
-          regionKey: region.key,
-          angle: 0,
-          quantity: Math.max(0, Math.min(region.pointCount, 100)),
-        },
+        createDefaultPlanItem(region, () => crypto.randomUUID()),
       ];
       saveStoredPlan(next);
       return next;
@@ -548,9 +419,7 @@ export function Visualiser() {
   }, []);
 
   const handleUpdatePlanAngle = useCallback((planItemId: string, angle: number): void => {
-    const normalized = Number.isFinite(angle)
-      ? THREE.MathUtils.clamp(Math.round(angle), 0, 360)
-      : 0;
+    const normalized = normalizePlanAngle(angle);
     setPlan((prev) =>
       prev.map((item) => (item.id === planItemId ? { ...item, angle: normalized } : item)),
     );
@@ -561,9 +430,7 @@ export function Visualiser() {
   }, []);
 
   const handleUpdatePlanQuantity = useCallback((planItemId: string, quantity: number): void => {
-    const normalized = Number.isFinite(quantity)
-      ? Math.max(0, Math.round(quantity))
-      : 0;
+    const normalized = normalizePlanQuantity(quantity);
     setPlan((prev) =>
       prev.map((item) => (item.id === planItemId ? { ...item, quantity: normalized } : item)),
     );
@@ -622,7 +489,7 @@ export function Visualiser() {
 
   const handleSelectRegion = useCallback((key: string): void => {
     setSelectedRegionKeys((prev) =>
-      prev.includes(key) ? prev.filter((value) => value !== key) : [...prev, key],
+      toggleSelectedRegionKey(prev, key),
     );
   }, []);
 
@@ -660,39 +527,17 @@ export function Visualiser() {
   const handleStartPlanGeneration = useCallback((): void => {
     const worker = initializePlanGeneratorWorker();
 
-    const prismByKey = new Map(regionPrismsRef.current.map((regionPrism) => [regionPrism.key, regionPrism]));
-    const requestRegions = regions
-      .map((region) => {
-        const prism = prismByKey.get(region.key);
-        if (!prism) {
-          return null;
-        }
+    const request = buildGeneratePlanRequest(
+      regions,
+      regionPrismsRef.current,
+      generationTargetPointCount,
+      generationTargetAverageW,
+    );
 
-        return {
-          key: region.key,
-          maxQuantity: Math.max(0, Math.round(region.pointCount)),
-          averageW: region.avgW,
-          validStartAngles: prism.validStartAngles,
-        };
-      })
-      .filter((region): region is NonNullable<typeof region> => region !== null);
-
-    if (requestRegions.length === 0) {
+    if (!request) {
       setStatus("Add at least one region before generating a plan.");
       return;
     }
-
-    const request: GeneratePlanRequest = {
-      regions: requestRegions,
-      targetPointCount: Math.max(0, Math.round(generationTargetPointCount)),
-      targetAverageW: Number.isFinite(generationTargetAverageW) ? generationTargetAverageW : 0,
-      populationSize: 140,
-      maxGenerations: 3500,
-      reportEveryGenerations: 10,
-      mutationRate: 0.14,
-      eliteCount: 8,
-      stallGenerations: 700,
-    };
 
     const runId = planGeneratorRunIdRef.current + 1;
     planGeneratorRunIdRef.current = runId;
@@ -755,8 +600,8 @@ export function Visualiser() {
         generationRunning={generationRunning}
         generationBestCandidate={generationBestCandidate}
         generationBestGeneration={generationBestGeneration}
-        onUpdateGenerationTargetPointCount={(value) => setGenerationTargetPointCount(Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0)}
-        onUpdateGenerationTargetAverageW={(value) => setGenerationTargetAverageW(Number.isFinite(value) ? value : 0)}
+        onUpdateGenerationTargetPointCount={(value) => setGenerationTargetPointCount(normalizeTargetPointCount(value))}
+        onUpdateGenerationTargetAverageW={(value) => setGenerationTargetAverageW(normalizeTargetAverageW(value))}
         onStartGeneration={handleStartPlanGeneration}
         onStopGeneration={handleStopPlanGeneration}
       />
