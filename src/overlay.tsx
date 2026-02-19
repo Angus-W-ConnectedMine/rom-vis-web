@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Point } from "./points";
 import { RegionFormModal } from "./regionFormModal";
 import { type PlanGrandTotal, type PlanItem, type PlanOutcomeItem } from "./OperationPlan";
+import type { GeneratedPlanCandidate } from "./generatePlan";
 import { RegionTab } from "./RegionTab";
 import { PlanTab } from "./PlanTab";
 
@@ -42,6 +43,15 @@ interface OverlayProps {
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
   onUpdatePlanQuantity: (planItemId: string, quantity: number) => void;
   onDeletePlanItem: (planItemId: string) => void;
+  generationTargetPointCount: number;
+  generationTargetAverageW: number;
+  generationRunning: boolean;
+  generationBestCandidate: GeneratedPlanCandidate | null;
+  generationBestGeneration: number;
+  onUpdateGenerationTargetPointCount: (value: number) => void;
+  onUpdateGenerationTargetAverageW: (value: number) => void;
+  onStartGeneration: () => void;
+  onStopGeneration: () => void;
 }
 
 function getSummary(regions: RegionMeta[], selectedRegionKeys: string[]) {
@@ -75,6 +85,15 @@ export function Overlay(props: OverlayProps) {
     onUpdatePlanAngle,
     onUpdatePlanQuantity,
     onDeletePlanItem,
+    generationTargetPointCount,
+    generationTargetAverageW,
+    generationRunning,
+    generationBestCandidate,
+    generationBestGeneration,
+    onUpdateGenerationTargetPointCount,
+    onUpdateGenerationTargetAverageW,
+    onStartGeneration,
+    onStopGeneration,
   } = props;
   const regionItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previousSelectedRegionKeysRef = useRef<string[]>([]);
@@ -158,6 +177,15 @@ export function Overlay(props: OverlayProps) {
             onUpdatePlanAngle={onUpdatePlanAngle}
             onUpdatePlanQuantity={onUpdatePlanQuantity}
             onDeletePlanItem={onDeletePlanItem}
+            generationTargetPointCount={generationTargetPointCount}
+            generationTargetAverageW={generationTargetAverageW}
+            generationRunning={generationRunning}
+            generationBestCandidate={generationBestCandidate}
+            generationBestGeneration={generationBestGeneration}
+            onUpdateGenerationTargetPointCount={onUpdateGenerationTargetPointCount}
+            onUpdateGenerationTargetAverageW={onUpdateGenerationTargetAverageW}
+            onStartGeneration={onStartGeneration}
+            onStopGeneration={onStopGeneration}
           />
         )}
       </aside>

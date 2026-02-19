@@ -12,6 +12,7 @@ import {
 } from "./geometry";
 import type { PlanItem } from "./OperationPlan";
 import type { RegionMeta, SelectionRect } from "./overlay";
+import { computeValidStartAnglesForRegion } from "./planStats";
 import type { Point } from "./points";
 import { loadStoredPrisms } from "./storage";
 
@@ -21,6 +22,7 @@ export interface RegionPrism {
   prism: THREE.Group;
   snapshot: PrismSnapshot;
   label: CSS2DObject;
+  validStartAngles: boolean[];
 }
 
 interface UseVisualiserSceneArgs {
@@ -288,7 +290,14 @@ export function useVisualiserScene({
             prism.traverse((node) => {
               node.userData.regionKey = key;
             });
-            restoredRegionPrisms.push({ key, regionId, prism, snapshot, label });
+            restoredRegionPrisms.push({
+              key,
+              regionId,
+              prism,
+              snapshot,
+              label,
+              validStartAngles: computeValidStartAnglesForRegion(snapshot, renderPoints),
+            });
             restoredRegions.push(
               getRegionMetaFromSelection(key, regionId, snapshot, selectedPoints, pointOffset),
             );

@@ -24,15 +24,78 @@ import {
   saveStoredPlan,
   saveStoredPrisms,
 } from "./storage";
-import { computePlanStats } from "./planStats";
+import { computePlanStats, computeValidStartAnglesForRegion } from "./planStats";
+import type { GeneratePlanRequest, GeneratedPlanCandidate } from "./generatePlan";
 import { usePlanExtractionVolumes } from "./usePlanExtractionVolumes";
 import { useSelectionController } from "./useSelectionController";
 import { useVisualiserScene, type RegionPrism } from "./useVisualiserScene";
 
 const REGION_DEFAULT_COLOR = 0x22d3ee;
 const REGION_SELECTED_COLOR = 0xf59e0b;
+const GENERATOR_DEFAULT_TARGET_POINTS = 1000;
+const GENERATOR_DEFAULT_TARGET_GRADE = 0;
+const GENERATOR_PREVIEW_UPDATE_INTERVAL_MS = 250;
+const PLAN_WORKER_SCRIPT_PATH = "/generatePlan.worker.js";
 
 const REGION_LABEL_Z_OFFSET = 1.5;
+
+type WorkerProgressMessage = {
+  type: "progress";
+  runId: number;
+  generation: number;
+  candidate: GeneratedPlanCandidate;
+};
+
+type WorkerReadyMessage = {
+  type: "ready";
+  timestamp: number;
+};
+
+type WorkerDoneMessage = {
+  type: "done";
+  runId: number;
+  candidate: GeneratedPlanCandidate;
+  cancelled: boolean;
+};
+
+type PlanGeneratorWorkerMessage = WorkerReadyMessage | WorkerProgressMessage | WorkerDoneMessage;
+
+function formatWorkerError(event: Event | ErrorEvent): string {
+  if (event instanceof ErrorEvent) {
+    const details: string[] = [];
+    if (typeof event.message === "string" && event.message.length > 0) {
+      details.push(event.message);
+    }
+    if (typeof event.filename === "string" && event.filename.length > 0) {
+      const line = Number.isFinite(event.lineno) ? event.lineno : 0;
+      const column = Number.isFinite(event.colno) ? event.colno : 0;
+      details.push(`${event.filename}:${line}:${column}`);
+    }
+    if (details.length > 0) {
+      return details.join(" @ ");
+    }
+    if (event.error instanceof Error && event.error.message.length > 0) {
+      return event.error.message;
+    }
+  }
+
+  if (typeof event.type === "string" && event.type.length > 0) {
+    return `event type: ${event.type}`;
+  }
+
+  return "unknown worker error";
+}
+
+function candidateToPlanItems(candidate: GeneratedPlanCandidate): PlanItem[] {
+  return candidate.items
+    .filter((item) => item.quantity > 0)
+    .map((item, index) => ({
+      id: `ga-preview-${item.regionKey}-${index}`,
+      regionKey: item.regionKey,
+      angle: item.angle,
+      quantity: item.quantity,
+    }));
+}
 
 function createRegionLabel(regionId: string): CSS2DObject {
   const element = document.createElement("div");
@@ -158,17 +221,154 @@ export function Visualiser() {
   const [editingRegionKey, setEditingRegionKey] = useState<string | null>(null);
   const [status, setStatus] = useState("Loading points...");
   const [interactionElement, setInteractionElement] = useState<HTMLCanvasElement | null>(null);
+  const [generationTargetPointCount, setGenerationTargetPointCount] = useState<number>(GENERATOR_DEFAULT_TARGET_POINTS);
+  const [generationTargetAverageW, setGenerationTargetAverageW] = useState<number>(GENERATOR_DEFAULT_TARGET_GRADE);
+  const [generationRunning, setGenerationRunning] = useState(false);
+  const [generationBestCandidate, setGenerationBestCandidate] = useState<GeneratedPlanCandidate | null>(null);
+  const [generationBestGeneration, setGenerationBestGeneration] = useState(0);
+  const [previewPlan, setPreviewPlan] = useState<PlanItem[] | null>(null);
 
   const selectionRectRef = useRef<SelectionRect | null>(null);
   const editingRegionKeyRef = useRef<string | null>(null);
+  const regionsRef = useRef<RegionMeta[]>([]);
+  const planGeneratorWorkerRef = useRef<Worker | null>(null);
+  const planGeneratorRunIdRef = useRef(0);
+  const lastPreviewUpdateAtRef = useRef(0);
+  const displayPlan = previewPlan ?? plan;
   const planStats = useMemo(
-    () => computePlanStats(regions, plan, regionPrismsRef.current, pointsRef.current),
-    [regions, plan],
+    () => computePlanStats(regions, displayPlan, regionPrismsRef.current, pointsRef.current),
+    [regions, displayPlan],
   );
 
   useEffect(() => {
     editingRegionKeyRef.current = editingRegionKey;
   }, [editingRegionKey]);
+
+  useEffect(() => {
+    regionsRef.current = regions;
+  }, [regions]);
+
+  const initializePlanGeneratorWorker = useCallback((): Worker => {
+    const existingWorker = planGeneratorWorkerRef.current;
+    if (existingWorker) {
+      return existingWorker;
+    }
+
+    const worker = new Worker(PLAN_WORKER_SCRIPT_PATH, { type: "module" });
+    console.log("[visualiser] plan worker created");
+    worker.onerror = (event: ErrorEvent): void => {
+      const message = formatWorkerError(event);
+      console.error("[visualiser] plan worker error", { message, event });
+      setStatus(`Plan worker error: ${message}`);
+    };
+    worker.onmessageerror = (event: MessageEvent): void => {
+      console.error("[visualiser] plan worker message error", event);
+      setStatus(`Plan worker message error: ${event.type || "unknown"}`);
+    };
+    worker.onmessage = (event: MessageEvent<PlanGeneratorWorkerMessage>): void => {
+      const message = event.data;
+      if (!message) {
+        return;
+      }
+
+      if (message.type === "ready") {
+        console.log("[visualiser] plan worker ready", { timestamp: message.timestamp });
+        setStatus("Plan generator ready.");
+        return;
+      }
+
+      const activeRunId = planGeneratorRunIdRef.current;
+      if (message.runId !== activeRunId) {
+        return;
+      }
+
+      if (message.type === "progress") {
+        setGenerationBestCandidate(message.candidate);
+        setGenerationBestGeneration(message.generation);
+        const now = Date.now();
+        if ((now - lastPreviewUpdateAtRef.current) >= GENERATOR_PREVIEW_UPDATE_INTERVAL_MS) {
+          lastPreviewUpdateAtRef.current = now;
+          const regionKeys = new Set(regionsRef.current.map((region) => region.key));
+          const nextPreviewPlan = candidateToPlanItems(message.candidate)
+            .filter((item) => regionKeys.has(item.regionKey));
+          setPreviewPlan(nextPreviewPlan);
+        }
+        return;
+      }
+
+      if (message.type !== "done") {
+        return;
+      }
+
+      setGenerationRunning(false);
+      setGenerationBestCandidate(message.candidate);
+      setPreviewPlan(null);
+
+      if (message.cancelled) {
+        setStatus("Plan generation stopped.");
+        return;
+      }
+
+      const regionKeys = new Set(regionsRef.current.map((region) => region.key));
+      const nextPlan: PlanItem[] = candidateToPlanItems(message.candidate)
+        .filter((item) => regionKeys.has(item.regionKey))
+        .map((item) => ({
+          ...item,
+          id: crypto.randomUUID(),
+        }));
+
+      setPlan(nextPlan);
+      saveStoredPlan(nextPlan);
+      setStatus("Plan generation complete.");
+    };
+    planGeneratorWorkerRef.current = worker;
+    return worker;
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch(PLAN_WORKER_SCRIPT_PATH, {
+          method: "GET",
+          cache: "no-store",
+        });
+        const contentType = response.headers.get("content-type") ?? "(missing)";
+        const statusSummary = `${response.status} ${response.statusText || ""}`.trim();
+        const isJavaScriptLike =
+          contentType.includes("javascript") ||
+          contentType.includes("ecmascript") ||
+          contentType.includes("typescript");
+
+        if (!response.ok || !isJavaScriptLike) {
+          setStatus(`Plan worker precheck failed: ${statusSummary}; content-type=${contentType}`);
+          console.error("[visualiser] plan worker precheck failed", {
+            path: PLAN_WORKER_SCRIPT_PATH,
+            status: statusSummary,
+            contentType,
+          });
+          return;
+        }
+
+        console.log("[visualiser] plan worker precheck ok", {
+          path: PLAN_WORKER_SCRIPT_PATH,
+          status: statusSummary,
+          contentType,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(`Plan worker precheck failed: ${message}`);
+        console.error("[visualiser] plan worker precheck failed", {
+          path: PLAN_WORKER_SCRIPT_PATH,
+          message,
+        });
+      }
+    })();
+
+    return () => {
+      planGeneratorWorkerRef.current?.terminate();
+      planGeneratorWorkerRef.current = null;
+    };
+  }, []);
 
   const persistRegionPrisms = useCallback((): void => {
     saveStoredPrisms(
@@ -267,7 +467,14 @@ export function Visualiser() {
     prism.traverse((node) => {
       node.userData.regionKey = key;
     });
-    regionPrismsRef.current.push({ key, regionId: suggestedId, prism, snapshot: prismSnapshot, label });
+    regionPrismsRef.current.push({
+      key,
+      regionId: suggestedId,
+      prism,
+      snapshot: prismSnapshot,
+      label,
+      validStartAngles: computeValidStartAnglesForRegion(prismSnapshot, pointsRef.current),
+    });
     persistRegionPrisms();
 
     setRegions((prev) => [
@@ -320,6 +527,7 @@ export function Visualiser() {
     planExtractionVolumesRef,
     plan,
     extractedPointsByItemId: planStats.extractedPointsByItemId,
+    invalidStartByItemId: planStats.invalidStartByItemId,
   });
 
   const handleAddRegionToPlan = useCallback((region: RegionMeta): void => {
@@ -449,6 +657,73 @@ export function Visualiser() {
     setSelectedRegionKeys([]);
   }, []);
 
+  const handleStartPlanGeneration = useCallback((): void => {
+    const worker = initializePlanGeneratorWorker();
+
+    const prismByKey = new Map(regionPrismsRef.current.map((regionPrism) => [regionPrism.key, regionPrism]));
+    const requestRegions = regions
+      .map((region) => {
+        const prism = prismByKey.get(region.key);
+        if (!prism) {
+          return null;
+        }
+
+        return {
+          key: region.key,
+          maxQuantity: Math.max(0, Math.round(region.pointCount)),
+          averageW: region.avgW,
+          validStartAngles: prism.validStartAngles,
+        };
+      })
+      .filter((region): region is NonNullable<typeof region> => region !== null);
+
+    if (requestRegions.length === 0) {
+      setStatus("Add at least one region before generating a plan.");
+      return;
+    }
+
+    const request: GeneratePlanRequest = {
+      regions: requestRegions,
+      targetPointCount: Math.max(0, Math.round(generationTargetPointCount)),
+      targetAverageW: Number.isFinite(generationTargetAverageW) ? generationTargetAverageW : 0,
+      populationSize: 140,
+      maxGenerations: 3500,
+      reportEveryGenerations: 10,
+      mutationRate: 0.14,
+      eliteCount: 8,
+      stallGenerations: 700,
+    };
+
+    const runId = planGeneratorRunIdRef.current + 1;
+    planGeneratorRunIdRef.current = runId;
+    setGenerationRunning(true);
+    setGenerationBestCandidate(null);
+    setGenerationBestGeneration(0);
+    setPreviewPlan([]);
+    lastPreviewUpdateAtRef.current = 0;
+    setStatus("Generating plan...");
+    console.log("[visualiser] starting plan generation", { runId, request });
+
+    worker.postMessage({
+      type: "start",
+      runId,
+      request,
+    });
+  }, [generationTargetAverageW, generationTargetPointCount, initializePlanGeneratorWorker, regions]);
+
+  const handleStopPlanGeneration = useCallback((): void => {
+    const worker = planGeneratorWorkerRef.current;
+    if (!worker || !generationRunning) {
+      return;
+    }
+
+    worker.terminate();
+    planGeneratorWorkerRef.current = null;
+    setGenerationRunning(false);
+    setPreviewPlan(null);
+    setStatus("Plan generation stopped.");
+  }, [generationRunning]);
+
   const editingRegion = editingRegionKey === null
     ? null
     : regions.find((region) => region.key === editingRegionKey) ?? null;
@@ -468,13 +743,22 @@ export function Visualiser() {
         onSelectRegion={handleSelectRegion}
         onDeleteRegion={handleDeleteRegion}
         onClearSelections={handleClearSelections}
-        plan={plan}
+        plan={displayPlan}
         outcomeByItemId={planStats.outcomeByItemId}
         grandTotal={planStats.grandTotal}
         onAddRegionToPlan={handleAddRegionToPlan}
         onUpdatePlanAngle={handleUpdatePlanAngle}
         onUpdatePlanQuantity={handleUpdatePlanQuantity}
         onDeletePlanItem={handleDeletePlanItem}
+        generationTargetPointCount={generationTargetPointCount}
+        generationTargetAverageW={generationTargetAverageW}
+        generationRunning={generationRunning}
+        generationBestCandidate={generationBestCandidate}
+        generationBestGeneration={generationBestGeneration}
+        onUpdateGenerationTargetPointCount={(value) => setGenerationTargetPointCount(Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0)}
+        onUpdateGenerationTargetAverageW={(value) => setGenerationTargetAverageW(Number.isFinite(value) ? value : 0)}
+        onStartGeneration={handleStartPlanGeneration}
+        onStopGeneration={handleStopPlanGeneration}
       />
     </div>
   );

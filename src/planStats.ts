@@ -8,12 +8,17 @@ export interface PlanStats {
   outcomeByItemId: Record<string, PlanOutcomeItem>;
   grandTotal: PlanGrandTotal;
   extractedPointsByItemId: Record<string, Point[]>;
+  invalidStartByItemId: Record<string, boolean>;
 }
 
 export interface PlanRegionPrism {
   key: string;
   snapshot: PrismSnapshot;
+  validStartAngles: boolean[];
 }
+
+const START_OFFSET_FROM_REGION_EDGE = 10;
+const START_CLEARANCE_RADIUS = 5;
 
 function getDepthFromRegionEdge(
   point: Point,
@@ -143,6 +148,64 @@ function getEmptyGrandTotal(): PlanGrandTotal {
   };
 }
 
+function hasPointsWithinRadiusXY(
+  points: Point[],
+  position: { x: number; y: number },
+  radius: number,
+): boolean {
+  const radiusSquared = radius * radius;
+  for (const point of points) {
+    const dx = point.x - position.x;
+    const dy = point.y - position.y;
+    if ((dx * dx) + (dy * dy) <= radiusSquared) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getNormalizedAngleIndex(angleDegrees: number): number {
+  const rounded = Math.round(angleDegrees);
+  const modulo = rounded % 360;
+  return modulo >= 0 ? modulo : modulo + 360;
+}
+
+export function computeValidStartAnglesForRegion(
+  snapshot: PrismSnapshot,
+  points: Point[],
+): boolean[] {
+  const validAngles = new Array<boolean>(360).fill(false);
+  const center = getRegionCenter(snapshot);
+
+  for (let angle = 0; angle < 360; angle += 1) {
+    const angleRadians = THREE.MathUtils.degToRad(angle);
+    const outward = new THREE.Vector3(Math.cos(angleRadians), Math.sin(angleRadians), 0);
+
+    let regionEdgeProjection = -Infinity;
+    for (const vertex of snapshot.footprint) {
+      const projection = (vertex.x * outward.x) + (vertex.y * outward.y);
+      if (projection > regionEdgeProjection) {
+        regionEdgeProjection = projection;
+      }
+    }
+
+    if (!Number.isFinite(regionEdgeProjection)) {
+      continue;
+    }
+
+    const centerProjection = (center.x * outward.x) + (center.y * outward.y);
+    const distanceToEdge = regionEdgeProjection - centerProjection;
+    const startDistanceFromCenter = distanceToEdge + START_OFFSET_FROM_REGION_EDGE;
+    const startPosition = {
+      x: center.x + (outward.x * startDistanceFromCenter),
+      y: center.y + (outward.y * startDistanceFromCenter),
+    };
+    validAngles[angle] = !hasPointsWithinRadiusXY(points, startPosition, START_CLEARANCE_RADIUS);
+  }
+
+  return validAngles;
+}
+
 export function computePlanStats(
   regions: RegionMeta[],
   plan: PlanItem[],
@@ -154,6 +217,7 @@ export function computePlanStats(
       outcomeByItemId: {},
       grandTotal: getEmptyGrandTotal(),
       extractedPointsByItemId: {},
+      invalidStartByItemId: {},
     };
   }
 
@@ -169,6 +233,7 @@ export function computePlanStats(
 
   const outcomeByItemId: Record<string, PlanOutcomeItem> = {};
   const extractedPointsByItemId: Record<string, Point[]> = {};
+  const invalidStartByItemId: Record<string, boolean> = {};
   let grandExtractedPointCount = 0;
   let grandExtractedW = 0;
 
@@ -187,6 +252,7 @@ export function computePlanStats(
       extractedAverageW: 0,
     };
     extractedPointsByItemId[item.id] = [];
+    invalidStartByItemId[item.id] = false;
   }
 
   for (const [regionKey, items] of itemsByRegionKey) {
@@ -206,6 +272,9 @@ export function computePlanStats(
 
     for (const item of items) {
       const quantity = Math.max(0, Math.round(item.quantity));
+      const angleIndex = getNormalizedAngleIndex(item.angle);
+      invalidStartByItemId[item.id] = !regionPrism.validStartAngles[angleIndex];
+
       if (quantity === 0 || remaining.length === 0) {
         outcomeByItemId[item.id] = {
           planItemId: item.id,
@@ -264,5 +333,6 @@ export function computePlanStats(
       averageW: grandExtractedPointCount > 0 ? grandExtractedW / grandExtractedPointCount : 0,
     },
     extractedPointsByItemId,
+    invalidStartByItemId,
   };
 }

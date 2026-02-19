@@ -313,6 +313,23 @@ button:hover:not(:disabled) {
   margin-top: 0;
 }
 
+.plan-generator-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 10px;
+  background: rgba(2, 6, 23, 0.25);
+}
+
+.plan-generator-card input {
+  margin-bottom: 8px;
+}
+
+.plan-generator-status {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
 .plan-add-region-row {
   flex-wrap: wrap;
   margin-bottom: 8px;

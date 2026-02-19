@@ -5,7 +5,8 @@ import type { PlanItem } from "./OperationPlan";
 import type { Point } from "./points";
 import { createExtractionSnapshot } from "./planStats";
 
-const PLAN_EXTRACTION_COLOR = 0xff4d00;
+const PLAN_EXTRACTION_COLOR = 0x42f557;
+const PLAN_EXTRACTION_ERROR_COLOR = 0xdc2626;
 const PLAN_EXTRACTION_OPACITY = 0.3;
 
 interface RegionPrismForExtraction {
@@ -19,6 +20,7 @@ interface UsePlanExtractionVolumesArgs {
   planExtractionVolumesRef: React.RefObject<Map<string, THREE.Group>>;
   plan: PlanItem[];
   extractedPointsByItemId: Record<string, Point[]>;
+  invalidStartByItemId: Record<string, boolean>;
 }
 
 export function usePlanExtractionVolumes({
@@ -27,6 +29,7 @@ export function usePlanExtractionVolumes({
   planExtractionVolumesRef,
   plan,
   extractedPointsByItemId,
+  invalidStartByItemId,
 }: UsePlanExtractionVolumesArgs): void {
   useEffect(() => {
     const scene = sceneRef.current;
@@ -46,6 +49,7 @@ export function usePlanExtractionVolumes({
       if (extractedPoints.length === 0) {
         continue;
       }
+      const extractionColor = invalidStartByItemId[item.id] ? PLAN_EXTRACTION_ERROR_COLOR : PLAN_EXTRACTION_COLOR;
 
       const regionPrism = prismByKey.get(item.regionKey);
       if (!regionPrism) {
@@ -68,12 +72,12 @@ export function usePlanExtractionVolumes({
 
       extractionVolume.traverse((node) => {
         if (node instanceof THREE.Mesh && node.material instanceof THREE.MeshBasicMaterial) {
-          node.material.color.setHex(PLAN_EXTRACTION_COLOR);
+          node.material.color.setHex(extractionColor);
           node.material.opacity = PLAN_EXTRACTION_OPACITY;
           node.material.needsUpdate = true;
         }
         if (node instanceof THREE.LineSegments && node.material instanceof THREE.LineBasicMaterial) {
-          node.material.color.setHex(PLAN_EXTRACTION_COLOR);
+          node.material.color.setHex(extractionColor);
           node.material.opacity = 0.9;
           node.material.needsUpdate = true;
         }
@@ -81,5 +85,5 @@ export function usePlanExtractionVolumes({
 
       planExtractionVolumesRef.current.set(item.id, extractionVolume);
     }
-  }, [sceneRef, regionPrismsRef, planExtractionVolumesRef, plan, extractedPointsByItemId]);
+  }, [sceneRef, regionPrismsRef, planExtractionVolumesRef, plan, extractedPointsByItemId, invalidStartByItemId]);
 }

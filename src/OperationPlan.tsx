@@ -1,4 +1,5 @@
 import type { RegionMeta } from "./overlay";
+import type { GeneratedPlanCandidate } from "./generatePlan";
 
 export interface PlanItem {
   id: string;
@@ -30,6 +31,15 @@ interface OperationalPlanProps {
   onUpdatePlanAngle: (planItemId: string, angle: number) => void;
   onUpdatePlanQuantity: (planItemId: string, quantity: number) => void;
   onDeletePlanItem: (planItemId: string) => void;
+  generationTargetPointCount: number;
+  generationTargetAverageW: number;
+  generationRunning: boolean;
+  generationBestCandidate: GeneratedPlanCandidate | null;
+  generationBestGeneration: number;
+  onUpdateGenerationTargetPointCount: (value: number) => void;
+  onUpdateGenerationTargetAverageW: (value: number) => void;
+  onStartGeneration: () => void;
+  onStopGeneration: () => void;
 }
 
 export default function OperationalPlan({
@@ -41,10 +51,70 @@ export default function OperationalPlan({
   onUpdatePlanAngle,
   onUpdatePlanQuantity,
   onDeletePlanItem,
+  generationTargetPointCount,
+  generationTargetAverageW,
+  generationRunning,
+  generationBestCandidate,
+  generationBestGeneration,
+  onUpdateGenerationTargetPointCount,
+  onUpdateGenerationTargetAverageW,
+  onStartGeneration,
+  onStopGeneration,
 }: OperationalPlanProps) {
   return (
     <div className="card plan-card">
       <h4>Plan</h4>
+
+      <div className="plan-generator-card">
+        <p>Generate plan (GA)</p>
+        <div className="display-grid">
+          <span>Target points:</span>
+          <input
+            type="number"
+            min={0}
+            step={10}
+            value={generationTargetPointCount}
+            onChange={(event) => onUpdateGenerationTargetPointCount(Number(event.target.value))}
+          />
+          <span>Target grade:</span>
+          <input
+            type="number"
+            step={0.1}
+            value={generationTargetAverageW}
+            onChange={(event) => onUpdateGenerationTargetAverageW(Number(event.target.value))}
+          />
+        </div>
+        <div className="toolbar">
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={onStartGeneration}
+            disabled={generationRunning || regions.length === 0}
+          >
+            Generate
+          </button>
+          <button
+            type="button"
+            onClick={onStopGeneration}
+            disabled={!generationRunning}
+          >
+            Stop
+          </button>
+        </div>
+        {generationRunning ? <p className="plan-generator-status">Running...</p> : null}
+        {generationBestCandidate ? (
+          <div className="display-grid plan-generator-status">
+            <span>Best gen:</span>
+            <span>{generationBestGeneration}</span>
+            <span>Best points:</span>
+            <span>{generationBestCandidate.totalPoints}</span>
+            <span>Best grade:</span>
+            <span>{generationBestCandidate.averageW.toFixed(2)}</span>
+            <span>Score:</span>
+            <span>{generationBestCandidate.score.toFixed(4)}</span>
+          </div>
+        ) : null}
+      </div>
 
       <p>Add from:</p>
 
